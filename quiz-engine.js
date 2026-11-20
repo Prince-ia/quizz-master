@@ -56,6 +56,35 @@
     return questions;
   }
 
+  /**
+   * Indices des bonnes réponses d'une question.
+   * Une question « classique » utilise `answer` (index unique) ; une question
+   * multi-réponses utilise `answers` (tableau d'indices).
+   */
+  function correctIndices(question) {
+    if (!question) return [];
+    if (Array.isArray(question.answers)) {
+      return question.answers
+        .filter((value) => Number.isInteger(value) && value >= 0)
+        .sort((a, b) => a - b);
+    }
+    if (Number.isInteger(question.answer) && question.answer >= 0) return [question.answer];
+    return [];
+  }
+
+  /** Normalise une sélection (index unique ou tableau) en tableau trié unique. */
+  function normalizeSelection(value) {
+    const list = Array.isArray(value) ? value : (typeof value === 'number' ? [value] : []);
+    return Array.from(new Set(
+      list.filter((item) => Number.isInteger(item) && item >= 0)
+    )).sort((a, b) => a - b);
+  }
+
+  function sameSelection(a, b) {
+    if (a.length !== b.length) return false;
+    return a.every((value, index) => value === b[index]);
+  }
+
   function groupByChapter(questions) {
     const map = new Map();
     for (const question of questions) {
@@ -123,6 +152,27 @@
       chosen.push(pool.splice(index, 1)[0]);
     }
     return chosen;
+  }
+
+  /**
+   * Prépare une question pour une session : mélange des propositions et
+   * calcul des indices corrects après mélange.
+   */
+  function buildItem(question, rng = Math.random) {
+    const correct = new Set(correctIndices(question));
+    const options = shuffle(
+      (question.options || []).map((text, index) => ({ text, correct: correct.has(index) })),
+      rng
+    );
+    const answerIndices = options
+      .map((option, index) => (option.correct ? index : -1))
+      .filter((index) => index >= 0);
+    return {
+      question,
+      options,
+      answerIndices,
+      answerIndex: answerIndices.length ? answerIndices[0] : -1
+    };
   }
 
   /**
@@ -204,17 +254,7 @@
       selected.push(...extraSelection);
     }
 
-    const items = selected.map((question) => {
-      const options = shuffle(
-        question.options.map((text, index) => ({ text, correct: index === question.answer })),
-        rng
-      );
-      return {
-        question,
-        options,
-        answerIndex: options.findIndex((option) => option.correct)
-      };
-    });
+    const items = selected.map((question) => buildItem(question, rng));
 
     return {
       id: 'session_' + Math.floor(rng() * 1e9).toString(36) + '_' + now.toString(36),
@@ -263,17 +303,7 @@
 
     const selected = failed
       .slice(0, Math.max(1, Math.min(50, count)))
-      .map((question) => {
-        const optionsList = shuffle(
-          question.options.map((text, index) => ({ text, correct: index === question.answer })),
-          rng
-        );
-        return {
-          question,
-          options: optionsList,
-          answerIndex: optionsList.findIndex((option) => option.correct)
-        };
-      });
+      .map((question) => buildItem(question, rng));
 
     // Une session d'entraînement doit rester une partie complète : on complète
     // avec les questions les plus « chaudes » (échues / jamais vues) si les
@@ -288,15 +318,7 @@
         rng
       );
       for (const question of extraQuestions) {
-        const optionsList = shuffle(
-          question.options.map((text, index) => ({ text, correct: index === question.answer })),
-          rng
-        );
-        selected.push({
-          question,
-          options: optionsList,
-          answerIndex: optionsList.findIndex((option) => option.correct)
-        });
+        selected.push(buildItem(question, rng));
       }
     }
 
@@ -352,7 +374,8 @@
   /**
    * Corrige une session.
    * @param {Object} session
-   * @param {Array<number|null>} answers index choisi pour chaque question
+   * @param {Array<number[]|number|null>} answers sélection pour chaque question
+   *        (tableau d'indices ; un nombre reste accepté pour compatibilité)
    */
   function evaluate(session, answers) {
     const items = (session && session.items) || [];
@@ -361,15 +384,20 @@
     let answered = 0;
 
     items.forEach((item, index) => {
-      const chosen = typeof answers[index] === 'number' ? answers[index] : null;
-      const isCorrect = chosen !== null && chosen === item.answerIndex;
-      if (chosen !== null) answered++;
+      const chosen = normalizeSelection(answers ? answers[index] : null);
+      const expected = normalizeSelection(item.answerIndices || item.answerIndex);
+      const isCorrect = chosen.length > 0 && sameSelection(chosen, expected);
+      if (chosen.length > 0) answered++;
       if (isCorrect) correct++;
       results.push({
         question: item.question,
         options: item.options,
         answerIndex: item.answerIndex,
-        chosen,
+        answerIndices: expected,
+        chosen: chosen.length ? chosen : null,
+        chosenIndices: chosen,
+        chosenTexts: chosen.map((position) => (item.options[position] || {}).text || ''),
+        correctTexts: expected.map((position) => (item.options[position] || {}).text || ''),
         isCorrect
       });
     });
@@ -395,6 +423,10 @@
     shuffle,
     flatten,
     groupByChapter,
+    correctIndices,
+    normalizeSelection,
+    sameSelection,
+    buildItem,
     getWeight,
     weightedSample,
     buildSession,

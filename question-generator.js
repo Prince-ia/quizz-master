@@ -741,9 +741,30 @@
         }
       }
 
-      // 2) Question inverse : un seul élément appartient réellement à la liste.
-      if (pool.length >= 3) {
-        const trueItem = list.items[listIndex % list.items.length];
+      // 2) Question multi-réponses : deux éléments appartiennent à la liste.
+      if (pool.length >= 2 && list.items.length >= 4) {
+        const trueItems = pickEvenly(list.items, 2);
+        const start = (listIndex * 2) % pool.length;
+        const intruders2 = [];
+        for (let i = 0; i < pool.length && intruders2.length < 2; i++) {
+          const candidate = pool[(start + i) % pool.length];
+          if (!ownKeys.has(normalizeKey(candidate))) intruders2.push(candidate);
+        }
+        if (trueItems.length === 2 && intruders2.length === 2) {
+          group.push({
+            q: 'Lesquelles de ces propositions appartiennent à : « ' + intro + ' » ?',
+            options: [...trueItems, ...intruders2],
+            answers: [0, 1],
+            explanation: 'Deux propositions font partie de cette liste du cours : ' +
+              trueItems.join(' ; ') + '. Les deux autres n’en font pas partie.',
+            source: chapter.title,
+            kind: 'list-multi'
+          });
+        }
+      }
+
+      // 3) Question inverse : un seul élément appartient réellement à la liste.
+      if (pool.length >= 3) {        const trueItem = list.items[listIndex % list.items.length];
         const picked = [];
         const start = (listIndex * 2 + 1) % pool.length;
         for (let i = 0; i < pool.length && picked.length < 3; i++) {
@@ -762,7 +783,7 @@
         }
       }
 
-      // 3) Dénombrement : uniquement quand le cours annonce lui-même le nombre
+      // 4) Dénombrement : uniquement quand le cours annonce lui-même le nombre
       // (« il existe trois circonstances »), pour éviter toute ambiguïté.
       const announced = statedCount(list.intro);
       if (announced === list.items.length) {
@@ -893,10 +914,18 @@
       for (const question of questions) {
         const options = unique(question.options.map((opt) => cleanInline(opt)));
         if (options.length !== 4) continue;
-        if (question.options[question.answer] === undefined) continue;
-        const answerText = cleanInline(question.options[question.answer]);
-        const answerIndex = options.findIndex((opt) => opt === answerText);
-        if (answerIndex < 0) continue;
+        const correctSource = Array.isArray(question.answers) && question.answers.length
+          ? question.answers
+          : [question.answer];
+        const correctTexts = correctSource
+          .map((position) => question.options[position])
+          .filter((text) => text !== undefined)
+          .map((text) => cleanInline(text));
+        if (!correctTexts.length) continue;
+        const answerIndices = Array.from(new Set(
+          correctTexts.map((text) => options.indexOf(text)).filter((index) => index >= 0)
+        )).sort((a, b) => a - b);
+        if (!answerIndices.length) continue;
         const key = normalizeKey(question.q);
         if (seen.has(key)) continue;
         seen.add(key);
@@ -904,7 +933,8 @@
           id: makeQuestionId(documentId, item.chapter.id, question.q),
           text: question.q,
           options,
-          answer: answerIndex,
+          answer: answerIndices[0],
+          answers: answerIndices.length > 1 ? answerIndices : undefined,
           explanation: question.explanation,
           source: question.source || item.chapter.title,
           kind: question.kind || 'general',
@@ -964,13 +994,15 @@
       const chapterId = chapter.id || 'ch' + (index + 1);
       const questions = (chapter.questions || []).map((question) => {
         const options = (question.o || question.options || []).map((opt) => cleanInline(opt));
-        const answer = typeof question.a === 'number' ? question.a : question.answer;
+        const answers = Array.isArray(question.answers) ? question.answers.filter((value) => Number.isInteger(value) && value >= 0 && value < options.length) : [];
+        const answer = answers.length ? answers[0] : (typeof question.a === 'number' ? question.a : question.answer);
         const text = cleanInline(question.q || question.text);
         return {
           id: makeQuestionId(id, chapterId, text),
           text,
           options,
           answer,
+          answers: answers.length > 1 ? answers : undefined,
           explanation: question.e || question.explanation || '',
           source: question.s || question.source || chapter.title,
           kind: question.kind || 'curated',

@@ -1,64 +1,104 @@
 /*
- * Quiz Master — proxy IA optionnel (Node.js 18+, aucune dépendance)
+ * Quiz Master — serveur local (Node.js 18+, aucune dépendance)
  *
  * Rôle :
- *   1. Servir l'application en local :  http://localhost:8787
- *   2. Exposer /api/generate qui appelle un fournisseur compatible OpenAI
- *      en gardant la clé API côté serveur (jamais dans le navigateur).
+ *   1. Servir l'application :        http://localhost:8787
+ *   2. Exposer /api/generate         génération de questions (opencode ou OpenAI)
+ *   3. Exposer /api/ai/status        état des moteurs disponibles
  *
  * Lancement (PowerShell) :
- *   $env:OPENAI_API_KEY="sk-..."
- *   $env:OPENAI_MODEL="gpt-4o-mini"          # facultatif
- *   $env:OPENAI_BASE_URL="https://api.openai.com/v1"  # facultatif
  *   node server/server.js
  *
- * Puis, dans Quiz Master → Réglages → IA :
- *   Point d'API : http://localhost:8787/api/generate
+ * Fournisseurs (facultatifs) :
+ *   AI_PROVIDER=auto|opencode|openai   auto par défaut
+ *   OPENCODE_MODEL=opencode/deepseek-v4.1-flash-free
+ *   OPENAI_API_KEY=sk-...              uniquement pour le mode openai
+ *   OPENAI_MODEL=gpt-4o-mini
+ *   PORT=8787
  */
 'use strict';
 
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const ai = require('./ai');
 
 const ROOT = path.resolve(__dirname, '..');
 const PORT = Number(process.env.PORT || 8787);
-const API_KEY = process.env.OPENAI_API_KEY || '';
-const BASE_URL = (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
-const MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+const HOST = process.env.HOST || '127.0.0.1';
+const BODY_LIMIT = 5 * 1024 * 1024;
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
   '.ico': 'image/x-icon',
+  '.woff2': 'font/woff2',
   '.md': 'text/markdown; charset=utf-8',
   '.txt': 'text/plain; charset=utf-8'
 };
 
-function sendJson(res, status, payload) {
+/* ------------------------------- Utilitaires ---------------------------- */
+
+function securityHeaders() {
+  return {
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'Referrer-Policy': 'no-referrer',
+    'Permissions-Policy': 'geolocation=(), microphone=(), camera=()',
+    'Content-Security-Policy': [
+      "default-src 'self'",
+      "script-src 'self'",
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' data:",
+      "font-src 'self' data:",
+      "connect-src 'self' http: https:",
+      "manifest-src 'self'",
+      "worker-src 'self'",
+      "base-uri 'none'",
+      "form-action 'none'",
+      "frame-ancestors 'none'"
+    ].join('; ')
+  };
+}
+
+function corsHeaders() {
+  return {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Max-Age': '86400',
+    Vary: 'Origin'
+  };
+}
+
+function sendJson(res, status, payload, extra) {
   const body = JSON.stringify(payload);
   res.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
     'Content-Length': Buffer.byteLength(body),
-    'Cache-Control': 'no-store'
+    'Cache-Control': 'no-store',
+    ...securityHeaders(),
+    ...corsHeaders(),
+    ...(extra || {})
   });
   res.end(body);
 }
 
-function readBody(req, limit = 3 * 1024 * 1024) {
+function readBody(req, limit = BODY_LIMIT) {
   return new Promise((resolve, reject) => {
     let size = 0;
     const chunks = [];
     req.on('data', (chunk) => {
       size += chunk.length;
       if (size > limit) {
-        reject(new Error('Contenu trop volumineux.'));
+        reject(Object.assign(new Error('Contenu trop volumineux (5 Mo maximum).'), { status: 413 }));
         req.destroy();
         return;
       }
@@ -69,120 +109,160 @@ function readBody(req, limit = 3 * 1024 * 1024) {
   });
 }
 
-function extractJson(text) {
-  const cleaned = String(text || '').trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
-  const start = cleaned.indexOf('{');
-  const end = cleaned.lastIndexOf('}');
-  if (start < 0 || end <= start) throw new Error('Réponse IA non exploitable.');
-  return JSON.parse(cleaned.slice(start, end + 1));
+function clientIp(req) {
+  return (req.socket && req.socket.remoteAddress) || 'inconnu';
 }
 
-function buildPrompt(text, count, chapterTitle) {
-  return [
-    "Tu es un concepteur de questionnaires pédagogiques en français.",
-    "À partir UNIQUEMENT du texte de cours ci-dessous, rédige " + count + " questions à choix multiples.",
-    "Règles strictes :",
-    "- 4 propositions par question, une seule correcte.",
-    "- Les questions portent sur les définitions, mécanismes, dates, chiffres, listes et conduites à tenir du texte.",
-    "- N'invente AUCUNE information absente du texte.",
-    "- Chaque explication cite le contenu du cours.",
-    "- Évite les questions triviales et les doublons.",
-    "- Réponds exclusivement en JSON valide, sans texte autour, au format :",
-    '{"questions":[{"q":"...","options":["A","B","C","D"],"answer":0,"explanation":"...","source":"..."}]}',
-    chapterTitle ? "Titre de la section : " + chapterTitle : '',
-    "TEXTE DU COURS :",
-    text.slice(0, 12000)
-  ].filter(Boolean).join('\n');
-}
+/* --------------------------------- API ---------------------------------- */
 
 async function handleGenerate(req, res) {
-  if (!API_KEY) {
-    sendJson(res, 503, {
-      error: "Le proxy fonctionne, mais OPENAI_API_KEY n'est pas définie sur le serveur."
+  const limit = ai.checkRateLimit(clientIp(req));
+  if (!limit.allowed) {
+    sendJson(res, 429, {
+      error: 'Trop de requêtes IA. Réessaie dans ' + limit.retryAfter + ' secondes.'
+    }, { 'Retry-After': String(limit.retryAfter) });
+    return;
+  }
+
+  let body;
+  try {
+    const raw = await readBody(req);
+    body = raw ? JSON.parse(raw) : {};
+  } catch (error) {
+    sendJson(res, error.status || 400, {
+      error: error.status ? error.message : 'Corps de requête JSON invalide.'
     });
     return;
   }
+
   try {
-    const raw = await readBody(req);
-    const body = JSON.parse(raw);
-    const text = String(body.text || '').trim();
-    const count = Math.max(5, Math.min(60, Number(body.count) || 40));
-    if (text.length < 100) {
-      sendJson(res, 400, { error: 'Texte de cours trop court.' });
-      return;
-    }
-
-    const response = await fetch(BASE_URL + '/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: 'Bearer ' + API_KEY
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        temperature: 0.3,
-        response_format: { type: 'json_object' },
-        messages: [
-          { role: 'system', content: 'Tu réponds toujours par un objet JSON valide, en français.' },
-          { role: 'user', content: buildPrompt(text, count, body.chapterTitle) }
-        ]
-      })
+    const result = await ai.generate({
+      text: body.text,
+      count: body.count,
+      chapterTitle: body.chapterTitle,
+      model: body.model,
+      provider: body.provider
     });
-
-    if (!response.ok) {
-      const detail = await response.text();
-      sendJson(res, 502, { error: 'Erreur du fournisseur IA (' + response.status + ').', detail: detail.slice(0, 500) });
-      return;
-    }
-
-    const payload = await response.json();
-    const content = payload.choices && payload.choices[0] && payload.choices[0].message && payload.choices[0].message.content;
-    const parsed = extractJson(content);
-    sendJson(res, 200, { questions: Array.isArray(parsed.questions) ? parsed.questions : [] });
+    sendJson(res, 200, result);
   } catch (error) {
-    sendJson(res, 500, { error: error.message });
+    const status = error.status && error.status >= 400 ? error.status : 500;
+    if (status >= 500) console.error('[IA]', error.message);
+    sendJson(res, status, {
+      error: error.message || 'Erreur inattendue du service IA.',
+      ...(error.detail ? { detail: error.detail } : {})
+    });
   }
 }
 
+async function handleStatus(req, res) {
+  try {
+    const payload = await ai.status();
+    sendJson(res, 200, payload);
+  } catch (error) {
+    sendJson(res, 500, { error: error.message || 'État IA indisponible.' });
+  }
+}
+
+/* -------------------------------- Statique ------------------------------ */
+
 function serveStatic(req, res) {
-  const urlPath = decodeURIComponent((req.url || '/').split('?')[0]);
+  let urlPath;
+  try {
+    urlPath = decodeURIComponent((req.url || '/').split('?')[0]);
+  } catch (error) {
+    res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('Chemin invalide.');
+    return;
+  }
+
   const relative = urlPath === '/' ? 'index.html' : urlPath.replace(/^\/+/, '');
   const filePath = path.resolve(ROOT, relative);
 
-  if (!filePath.startsWith(ROOT)) {
-    res.writeHead(403);
+  if (path.relative(ROOT, filePath).startsWith('..') || path.isAbsolute(path.relative(ROOT, filePath))) {
+    res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
     res.end('Accès refusé.');
     return;
   }
 
   fs.stat(filePath, (error, stat) => {
     if (error || !stat.isFile()) {
-      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8', ...securityHeaders() });
       res.end('Fichier introuvable.');
       return;
     }
+    const ext = path.extname(filePath).toLowerCase();
+    const noCache = ['.html', '.js', '.css', '.webmanifest', '.json'].includes(ext);
     res.writeHead(200, {
-      'Content-Type': MIME[path.extname(filePath).toLowerCase()] || 'application/octet-stream',
-      'Cache-Control': 'no-cache'
+      'Content-Type': MIME[ext] || 'application/octet-stream',
+      'Content-Length': stat.size,
+      'Cache-Control': noCache ? 'no-cache' : 'public, max-age=86400',
+      ...securityHeaders()
     });
+    if (req.method === 'HEAD') {
+      res.end();
+      return;
+    }
     fs.createReadStream(filePath).pipe(res);
   });
 }
 
+/* -------------------------------- Serveur ------------------------------- */
+
 const server = http.createServer((req, res) => {
-  if (req.method === 'POST' && req.url === '/api/generate') {
+  const url = (req.url || '/').split('?')[0];
+
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204, { ...corsHeaders(), ...securityHeaders() });
+    res.end();
+    return;
+  }
+
+  if (url === '/api/generate') {
+    if (req.method !== 'POST') {
+      sendJson(res, 405, { error: 'Méthode non autorisée : utilise POST.' }, { Allow: 'POST, OPTIONS' });
+      return;
+    }
     handleGenerate(req, res);
     return;
   }
-  if (req.method === 'GET') {
+
+  if (url === '/api/ai/status') {
+    if (req.method !== 'GET') {
+      sendJson(res, 405, { error: 'Méthode non autorisée : utilise GET.' }, { Allow: 'GET, OPTIONS' });
+      return;
+    }
+    handleStatus(req, res);
+    return;
+  }
+
+  if (url.startsWith('/api/')) {
+    sendJson(res, 404, { error: 'Point d’API inconnu.' });
+    return;
+  }
+
+  if (req.method === 'GET' || req.method === 'HEAD') {
     serveStatic(req, res);
     return;
   }
-  res.writeHead(405);
+
+  res.writeHead(405, { 'Content-Type': 'text/plain; charset=utf-8', ...securityHeaders() });
   res.end('Méthode non autorisée.');
 });
 
-server.listen(PORT, () => {
-  console.log('Quiz Master — serveur local : http://localhost:' + PORT);
-  console.log('Proxy IA : ' + (API_KEY ? 'clé détectée (modèle ' + MODEL + ')' : 'aucune clé (mode local uniquement)'));
+setInterval(() => ai.pruneRateLimit(), 60 * 1000).unref();
+
+server.listen(PORT, HOST, () => {
+  console.log('Quiz Master — http://localhost:' + PORT);
+  ai.status().then((info) => {
+    const opencode = info.opencode;
+    console.log('Moteur IA : ' + info.provider + ' (modèle ' + (info.model || 'défaut') + ')');
+    console.log('opencode : ' + (opencode.installed
+      ? 'v' + opencode.version + ' — ' + opencode.models.length + ' modèle(s)'
+      : 'introuvable' + (opencode.error ? ' (' + opencode.error + ')' : '')));
+    console.log('OpenAI   : ' + (info.openai.configured ? 'clé détectée' : 'non configuré'));
+  }).catch(() => {});
+});
+
+process.on('SIGINT', () => {
+  server.close(() => process.exit(0));
 });

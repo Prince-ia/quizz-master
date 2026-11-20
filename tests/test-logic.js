@@ -44,6 +44,14 @@ function assertValidBank(bank, label) {
       const unique = new Set(question.options.map((opt) => opt.toLowerCase().trim()));
       assert(unique.size === 4, label + ' : options dupliquées dans « ' + question.text + ' »');
       assert(question.answer >= 0 && question.answer < 4, label + ' : index de réponse invalide');
+      if (question.answers) {
+        assert(Array.isArray(question.answers) && question.answers.length >= 2, label + ' : answers doit contenir au moins 2 indices');
+        assert(question.answers.includes(question.answer), label + ' : answers doit inclure answer');
+        assert.strictEqual(new Set(question.answers).size, question.answers.length, label + ' : answers contient des doublons');
+        for (const index of question.answers) {
+          assert(index >= 0 && index < 4, label + ' : index de answers invalide');
+        }
+      }
       assert(question.explanation && question.explanation.length > 5, label + ' : explication manquante');
       assert(question.source, label + ' : source manquante');
       for (const option of question.options) {
@@ -123,7 +131,9 @@ async function main() {
     assert.strictEqual(ids.size, 10, 'questions dupliquées dans la session');
     for (const item of session.items) {
       assert.strictEqual(item.options.length, 4);
-      assert.strictEqual(item.options.filter((opt) => opt.correct).length, 1, 'une seule bonne réponse attendue');
+      const correctCount = item.options.filter((opt) => opt.correct).length;
+      assert(correctCount >= 1, 'au moins une bonne réponse attendue');
+      assert.strictEqual(correctCount, item.answerIndices.length, 'answerIndices incohérent');
       for (const option of item.options) assert(option.text.length > 0);
     }
   });
@@ -133,13 +143,71 @@ async function main() {
     for (let seed = 1; seed <= 15; seed++) {
       const session = QuizEngine.buildSession({ questions, chapterId: 'all', count: 10, rng: QuizEngine.createRng(seed) });
       for (const item of session.items) {
-        const correct = item.options[item.answerIndex];
-        const originalIndex = item.question.options.findIndex((text) => text.trim() === correct.text.trim());
-        assert.strictEqual(originalIndex, item.question.answer, 'la bonne réponse a été perdue');
-        if (item.answerIndex !== originalIndex) changed++;
+        const correctTexts = item.options.filter((option) => option.correct).map((option) => option.text.trim());
+        const expectedTexts = (item.question.answers || [item.question.answer])
+          .map((index) => item.question.options[index].trim());
+        assert.deepStrictEqual(correctTexts.slice().sort(), expectedTexts.slice().sort(), 'la bonne réponse a été perdue');
+        if (item.answerIndex !== item.question.answer) changed++;
       }
     }
     assert(changed > 20, 'les propositions ne sont pas réellement mélangées (' + changed + ')');
+  });
+
+  await test('gère les questions à réponses multiples', () => {
+    const multi = {
+      id: 'multi-1',
+      text: 'Lesquelles sont correctes ?',
+      options: ['Un', 'Deux', 'Trois', 'Quatre'],
+      answers: [0, 2],
+      answer: 0,
+      explanation: 'Un et Trois sont corrects.',
+      source: 'Test',
+      chapterId: 'ch1'
+    };
+    assert.deepStrictEqual(QuizEngine.correctIndices(multi), [0, 2]);
+    assert.deepStrictEqual(QuizEngine.correctIndices(questions[0]), [questions[0].answer]);
+    assert.deepStrictEqual(QuizEngine.normalizeSelection([2, 0, 2]), [0, 2]);
+    assert.strictEqual(QuizEngine.sameSelection([0, 2], [2, 0]), false);
+    assert.strictEqual(QuizEngine.sameSelection([0, 2], [0, 2]), true);
+
+    const session = QuizEngine.buildSession({ questions: [multi], count: 1, rng: QuizEngine.createRng(4) });
+    const item = session.items[0];
+    assert.strictEqual(item.answerIndices.length, 2);
+
+    const exact = QuizEngine.evaluate(session, [item.answerIndices]);
+    assert.strictEqual(exact.correct, 1);
+    assert.strictEqual(exact.details[0].chosenTexts.length, 2);
+
+    const partial = QuizEngine.evaluate(session, [[item.answerIndices[0]]]);
+    assert.strictEqual(partial.correct, 0, 'une sélection partielle doit être fausse');
+
+    const extra = QuizEngine.evaluate(session, [[...item.answerIndices, 3]]);
+    assert.strictEqual(extra.correct, 0, 'une sélection trop large doit être fausse');
+
+    const none = QuizEngine.evaluate(session, [[]]);
+    assert.strictEqual(none.correct, 0);
+    assert.strictEqual(none.answered, 0);
+    assert.strictEqual(none.details[0].chosen, null);
+  });
+
+  await test('normalizePreset conserve les réponses multiples', () => {
+    const bank = QuestionGenerator.normalizePreset({
+      document: { id: 'multi-doc', name: 'Multi' },
+      chapters: [{
+        id: 'ch1',
+        title: 'Chapitre multi',
+        questions: [{
+          q: 'Lesquelles sont correctes ?',
+          options: ['Un', 'Deux', 'Trois', 'Quatre'],
+          answers: [1, 3],
+          explanation: 'Deux et Quatre.',
+          source: 'Test'
+        }]
+      }]
+    }, 'multi-doc');
+    const question = bank.chapters[0].questions[0];
+    assert.deepStrictEqual(question.answers, [1, 3]);
+    assert.strictEqual(question.answer, 1);
   });
 
   await test('respecte le chapitre demandé', () => {
@@ -213,7 +281,11 @@ async function main() {
   console.log('\n• Correction et résultats');
   await test('corrige correctement les réponses', () => {
     const session = QuizEngine.buildSession({ questions, count: 10, rng: QuizEngine.createRng(9) });
-    const answers = session.items.map((item, index) => index % 3 === 0 ? (item.answerIndex + 1) % 4 : item.answerIndex);
+    const answers = session.items.map((item, index) => {
+      if (index % 3 !== 0) return item.answerIndices;
+      const wrong = [0, 1, 2, 3].find((position) => !item.answerIndices.includes(position));
+      return [wrong];
+    });
     const result = QuizEngine.evaluate(session, answers);
     assert.strictEqual(result.total, 10);
     assert.strictEqual(result.correct, 6);
@@ -329,7 +401,11 @@ async function main() {
       session.items.forEach((item, index) => {
         sim.recordAnswer(item.question, index % 4 !== 0);
       });
-      const result = QuizEngine.evaluate(session, session.items.map((item, index) => index % 4 === 0 ? (item.answerIndex + 1) % 4 : item.answerIndex));
+      const result = QuizEngine.evaluate(session, session.items.map((item, index) => {
+        if (index % 4 !== 0) return item.answerIndices;
+        const wrong = [0, 1, 2, 3].find((position) => !item.answerIndices.includes(position));
+        return [wrong];
+      }));
       sim.recordQuiz({
         documentId: 'crt-2024',
         documentName: 'Secourisme',

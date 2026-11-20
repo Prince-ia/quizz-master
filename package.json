@@ -1,0 +1,17 @@
+{
+  "name": "quiz-master",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Quiz Master — transforme un cours DOCX en quiz, avec suivi de progression et génération locale via opencode.",
+  "license": "MIT",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server/server.js",
+    "test": "node tests/test-logic.js && node tests/test-opencode.js",
+    "check": "node --check app.js && node --check quiz-engine.js && node --check question-generator.js && node --check progress-manager.js && node --check ai-connector.js && node --check server/server.js && node --check server/ai/index.js",
+    "icons": "node tools/generate-icons.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

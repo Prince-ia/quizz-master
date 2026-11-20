@@ -4,9 +4,9 @@ Transforme un cours Word (`.docx`) en quiz à choix multiples **sans inventer de
 chaque question est construite à partir d'une phrase, d'une définition, d'une liste ou d'un
 chiffre réellement présent dans le document source.
 
-Application **100 % côté navigateur**, sans build ni dépendance : le DOCX est lu localement,
-la progression est stockée dans `localStorage`, et un petit serveur Node optionnel sert de
-proxy pour une génération de questions par IA.
+Application web (HTML + CSS + JavaScript, modules UMD), sans build ni dépendance : le DOCX
+est lu localement, la progression est stockée dans `localStorage`, et un petit serveur Node
+optionnel sert à la génération de questions par IA (proxy OpenAI ou **opencode** local).
 
 > Cours de démonstration inclus : **Manuel de Secourisme — CRT 2024**
 > (Croix-Rouge Togolaise, Département Secours et Gestion des Catastrophes),
@@ -36,18 +36,18 @@ proxy pour une génération de questions par IA.
 
 | | |
 |---|---|
-| **Type** | Application web statique (HTML + CSS + JavaScript, modules UMD) |
+| **Type** | Application web (HTML + CSS + JavaScript, modules UMD) |
 | **Dépendances** | Aucune (ni `npm install`, ni bundler) |
 | **Backend** | Facultatif — `server/server.js` (Node.js 18+, zéro dépendance) |
 | **Stockage** | `localStorage` (clé `quizmaster.v1`) |
 | **Langue** | Français |
-| **Tests** | 23 tests Node + 1 page d'intégration navigateur |
+| **Tests** | 25 tests logique + 11 tests IA (Node), 1 page d'intégration navigateur |
 
 Le parcours complet :
 
 ```
 DOCX  →  extraction du texte  →  découpage en chapitres  →  génération de questions
-      →  session de 10 questions adaptative  →  correction + explication
+      →  quiz continu (une ou plusieurs réponses)  →  résultats détaillés de toutes les questions
       →  statistiques, répétition espacée, progression par chapitre
 ```
 
@@ -56,41 +56,53 @@ DOCX  →  extraction du texte  →  découpage en chapitres  →  génération 
 ## 2. Fonctionnalités
 
 ### Import et génération
-- Import par **glisser-déposer** ou sélecteur de fichier, un ou plusieurs fichiers
-  `.docx`, `.txt` ou `.md` (les anciens `.doc` sont refusés avec un message explicite).
+- Import par **glisser-déposer** ou sélecteur de fichier : `.docx`, `.txt` ou `.md`
+  (les anciens `.doc` sont refusés avec un message explicite).
 - Extraction du texte **entièrement locale** (ZIP + `DecompressionStream`, repli sur Mammoth.js).
 - Détection automatique des chapitres (`CHAPITRE I`, `PARTIE 2`, `MODULE`, `LEÇON`, `SECTION`…).
-- Génération de questions ancrées dans le texte, en quatre familles :
-  - **définitions** (« Qu'est-ce que … ? ») ;
-  - **sigles et acronymes** (développement ↔ sigle) ;
-  - **données chiffrées** (fourchettes, années, quantités) ;
-  - **listes** (appartenance, exclusion, dénombrement).
-- Distracteurs tirés du **même cours** (autres définitions / listes du document).
+- Génération de questions ancrées dans le texte (définitions, sigles, données chiffrées, listes,
+  y compris **listes à réponses multiples**).
+- Distracteurs tirés du **même cours**.
 - Identifiants de questions **stables** : réimporter le même cours conserve la progression.
+- Nombre de questions par quiz configurable : **5, 10, 15 ou 20**.
 
-### Révision
-- Session de **10 questions** par défaut, ordre et propositions mélangés.
+### Révision (quiz continu)
+- Questions enchaînées **sans correction immédiate** : tu choisis **une ou plusieurs réponses**
+  puis tu cliques sur **Suivant** (aucune réponse sélectionnée compte comme fausse).
+- À la fin du quiz, une page de résultats affiche **toutes les questions** avec :
+  tes choix, la/les bonne(s) réponse(s), l'explication et la source, et un filtre **Tout / Erreurs**.
 - Deux modes : **quiz normal** (toutes les parties ou un chapitre) et **Réviser mes erreurs**.
-- Correction immédiate avec **explication** et **source** (titre du chapitre).
 - Sélection **adaptative** : les questions ratées et échues reviennent en priorité.
 - **Répétition espacée** par boîtes (0, 1, 3, 7, 14, 30 jours ; échec → retour sous 10 minutes).
 - Raccourcis clavier (voir [§4](#raccourcis-clavier)).
 
 ### Suivi
-- Tableau de bord : maîtrise par chapitre, notions difficiles, historique des quiz.
+- Tableau de bord : maîtrise par chapitre, notions difficiles, historique des quiz,
+  **activité des 7 derniers jours**.
+- **Objectif quotidien** de réponses (configurable) avec suivi du jour.
 - Statistiques : précision, séries (streak), questions vues, niveau (`Nouveau` → `Expert`).
-- Compteur d'occupation du stockage local.
+- Thème **sombre / clair / automatique**.
 
 ### Données
 - **Export / import** de la progression et des banques de questions en JSON.
+- Export des questions du cours actif en **CSV** ou en **Anki** (texte séparé par tabulations).
 - Réinitialisation séparée : statistiques seules, ou toutes les données.
 
 ### IA (optionnelle)
-- Proxy local qui garde la **clé API côté serveur**, jamais dans le navigateur.
-- Compatible avec tout fournisseur exposant une API **OpenAI-compatible**
+- Trois moteurs : **Local** (hors ligne, par défaut), **opencode local** (sans clé API),
+  ou **proxy IA** compatible OpenAI.
+- **opencode** : le serveur appelle `opencode run` sur ta machine avec un modèle gratuit
+  (ex. `opencode/deepseek-v4.1-flash-free`) ; aucune clé API requise.
+- **Proxy OpenAI-compatible** : la clé API reste côté serveur, jamais dans le navigateur
   (OpenAI, Groq, Mistral, Ollama, LM Studio, OpenRouter…).
-- Questions renvoyées par l'IA **validées et normalisées** ; toute question incomplète est écartée.
-- Sans proxy configuré, le mode local reste actif.
+- Les questions renvoyées par l'IA sont **validées** côté serveur : les citations « source »
+  introuvables dans le cours sont écartées.
+- Sans IA configurée, le mode local reste actif.
+
+### Hors ligne (PWA)
+- Manifeste web et service worker : l'application peut être installée et son interface
+  mise en cache pour un usage hors ligne.
+- La génération locale fonctionne hors ligne ; la génération IA nécessite le serveur/réseau.
 
 ---
 
@@ -101,40 +113,54 @@ DOCX  →  extraction du texte  →  découpage en chapitres  →  génération 
 | Usage | Requis |
 |---|---|
 | Consulter l'application | Un navigateur récent (Chrome/Edge 80+, Firefox 113+, Safari 16.4+) |
-| Serveur local + proxy IA | **Node.js 18+** (testé avec Node 20) |
+| Serveur local / IA / PWA | **Node.js 18+** (testé avec Node 20) |
+| Génération via opencode | [opencode](https://opencode.ai) installé sur la machine |
 | Lancer les tests | Node.js 18+ |
 
 ### Option A — sans serveur (le plus rapide)
 
-Ouvre simplement `index.html` dans le navigateur. Tout fonctionne, sauf l'IA.
+Ouvre simplement `index.html` dans le navigateur. Le mode local fonctionne, mais l'IA et
+l'installation PWA nécessitent un serveur HTTP.
 
 ### Option B — serveur local (recommandé)
 
 ```powershell
-node server/server.js
+npm start
+# ou : node server/server.js
 ```
 
 Puis ouvre **http://localhost:8787**.
 
-- Port personnalisable : `$env:PORT=9000; node server/server.js`
+- Port/hôte personnalisables : `$env:PORT=9000; $env:HOST="127.0.0.1"; node server/server.js`
 - Aucune installation : le serveur n'utilise que les modules natifs de Node.
 
-### Option C — mode IA
+### Option C — génération via opencode (sans clé API)
+
+1. Installe [opencode](https://opencode.ai) et vérifie : `opencode --version`.
+2. Lance le serveur local (`npm start`), puis ouvre l'application.
+3. **Réglages → Génération des questions** :
+   - Moteur : **opencode local**
+   - Modèle : ex. `opencode/deepseek-v4.1-flash-free`
+   - Cocher **Utiliser l'IA à l'import des documents**
+   - **Tester la connexion**, puis **Enregistrer**
+
+> La génération IA peut prendre 1 à 2 minutes selon le modèle et la taille du cours.
+> Les modèles gratuits d'opencode ne nécessitent pas de clé (`opencode auth list`).
+
+### Option D — proxy OpenAI-compatible
 
 ```powershell
 $env:OPENAI_API_KEY="sk-..."                        # obligatoire
 $env:OPENAI_MODEL="gpt-4o-mini"                     # facultatif
-$env:OPENAI_BASE_URL="https://api.openai.com/v1"    # facultatif (autre fournisseur compatible)
+$env:OPENAI_BASE_URL="https://api.openai.com/v1"    # facultatif
+$env:AI_PROVIDER="openai"                            # facultatif (auto par défaut)
 node server/server.js
 ```
 
-Puis dans l'application : **Réglages → Génération des questions**
+Puis dans **Réglages** : moteur **Proxy IA personnalisé**, renseigne le point d'API
+(`http://localhost:8787/api/generate`), active l'IA, teste et enregistre.
 
-1. Point d'API : `http://localhost:8787/api/generate`
-2. Cocher **Activer la génération par IA**
-3. Cliquer sur **Tester la connexion**, puis **Enregistrer**
-
-> Sans `OPENAI_API_KEY`, `/api/generate` répond `503` avec un message explicite ;
+> Sans `OPENAI_API_KEY` ni opencode installé, `/api/generate` renvoie une erreur explicite ;
 > l'application continue de fonctionner en mode local.
 
 ---
@@ -143,20 +169,22 @@ Puis dans l'application : **Réglages → Génération des questions**
 
 ### Parcours type
 
-1. **Accueil** — vue d'ensemble (précision, quiz terminés, questions vues, niveau).
+1. **Accueil** — vue d'ensemble, objectif du jour, reprise du dernier cours.
 2. **Mes cours** — importer un `.docx`, choisir le cours actif, puis un chapitre
    (ou « Toutes les parties »).
-3. **Quiz** — répondre, valider, lire l'explication, enchaîner.
-4. **Résultats** — score, durée, liste des erreurs, boutons *Rejouer* / *Réviser mes erreurs*.
-5. **Progression** — maîtrise par chapitre, notions difficiles, historique.
-6. **Réglages** — IA, export/import, réinitialisation.
+3. **Quiz** — pour chaque question, sélectionner une ou plusieurs réponses puis cliquer sur
+   **Suivant** (la progression indique le numéro de question, pas le score).
+4. **Résultats** — score, durée, puis le **détail de toutes les questions** (tes choix,
+   bonnes réponses, explications, sources) avec filtre Tout / Erreurs.
+5. **Progression** — maîtrise par chapitre, notions difficiles, historique, activité sur 7 jours.
+6. **Réglages** — moteur IA, nombre de questions, objectif, thème, exports et sauvegarde.
 
 ### Raccourcis clavier
 
 | Touche | Action |
 |---|---|
-| `1` – `4` ou `A` – `D` | Sélectionner une proposition |
-| `Entrée` | Valider la réponse, puis passer à la question suivante |
+| `1` – `4` ou `A` – `D` | Sélectionner / désélectionner une proposition |
+| `Entrée` | Passer à la question suivante (ou voir les résultats) |
 
 ---
 
@@ -174,10 +202,10 @@ Texte structuré (titres, paragraphes, puces)
 Banque : { document, chapters[{ id, title, questions[] }], stats }
    │  QuizEngine.buildSession()
    ▼
-Session de 10 questions (pondérée + répétition espacée)
-   │  QuizEngine.evaluate()
+Session (sélection pondérée + répétition espacée, réponses mélangées)
+   │  [réponses collectées sans correction immédiate]
    ▼
-Résultat → ProgressManager.recordAnswer() + recordQuiz()
+QuizEngine.evaluate() → ProgressManager.recordAnswer() + recordQuiz()
 ```
 
 ### 5.2 Extraction DOCX (`docx-reader.js`)
@@ -192,56 +220,29 @@ Les fichiers `.txt` et `.md` sont lus directement. Un `.docx` est une archive ZI
 Repli automatique sur **Mammoth.js** si l'API native n'est pas disponible.
 Aucun fichier n'est envoyé sur le réseau.
 
-### 5.3 Découpage en chapitres
+### 5.3 Génération locale (`question-generator.js`)
 
-`splitChapters()` repère les grands titres (`CHAPITRE`, `PARTIE`, `MODULE`, `LEÇON`,
-`SECTION` suivis d'un numéro romain ou arabe) et crée un chapitre par section.
-Les segments de moins de 250 caractères (lignes de sommaire) sont ignorés.
-Si aucun titre n'est détecté, tout le document devient un chapitre unique
-« Contenu du cours ».
-
-### 5.4 Génération locale (`question-generator.js`)
-
-Pour chaque chapitre, le générateur extrait des **candidats** puis les transforme en QCM à
-4 propositions :
-
-| Famille | Source dans le texte | Limite / chapitre |
-|---|---|---|
-| Définition | phrases de type « … est / désigne / signifie … » | 12 |
-| Donnée chiffrée | fourchettes, années, quantités avec unités | 5 + 4 + 4 |
-| Sigle / acronyme | `SIGLE (Expression développée)` | 4 |
-| Liste | puces précédées d'une introduction annonçant la liste | 6 |
-
-Règles de qualité :
+Pour chaque chapitre, le générateur extrait des candidats puis les transforme en QCM à 4
+propositions : définitions, sigles/acronymes, données chiffrées, listes (appartenance,
+exclusion, dénombrement, **réponses multiples**). Règles de qualité :
 
 - 4 propositions **uniques**, distracteurs issus du même document ;
-- phrases trop longues, objectifs pédagogiques et intitulés de section écartés ;
-- dédoublonnage par clé normalisée ;
-- **maximum 26 questions par chapitre**, mélange déterministe (identifiants stables).
+- phrases trop longues et intitulés de section écartés ;
+- dédoublonnage par clé normalisée ; maximum **26 questions par chapitre** ;
+- identifiants **stables** (réimport = progression conservée).
 
-> Sur le manuel CRT 2024, la génération locale produit **67 questions** en plus des
-> 140 questions préchargées.
+### 5.4 Sélection adaptative (`quiz-engine.js`)
 
-### 5.5 Sélection adaptative (`quiz-engine.js`)
+Chaque question reçoit un poids selon son historique (taux d'erreur, boîte, échéance,
+récence). Les questions **jamais vues** sont prioritaires ; une part des places est réservée
+aux questions échouées/échues. Tirage **pondéré sans remise**, mélange des propositions.
+Si un chapitre manque de questions, la session est complétée avec les autres chapitres
+**du même document**.
 
-Chaque question reçoit un **poids** :
+Les questions à réponses multiples portent un champ `answers` (tableau d'indices) ; la
+réponse est correcte uniquement si la sélection correspond **exactement** à l'ensemble attendu.
 
-```
-poids = 16 + 95 × taux d'erreur
-      + 20  si boîte 0 ou plus d'erreurs que de réussites
-      + 22…82 si la question est échue (majoration croissante, plafond 60 jours)
-      × 0,3 si elle n'est pas encore échue
-      − 3 × boîte (max −15)
-      × 0,12 si elle vient d'être posée (état `recent`)
-```
-
-- Les questions **jamais vues** ont un poids de 100.
-- **40 % des places** (au moins 1) sont réservées aux questions échouées et échues.
-- Tirage **pondéré sans remise** (`weightedSample`), puis mélange des propositions.
-- Si un chapitre manque de questions, la session est complétée avec les autres chapitres
-  **du même document** (jamais d'un autre cours).
-
-### 5.6 Répétition espacée (`progress-manager.js`)
+### 5.5 Répétition espacée (`progress-manager.js`)
 
 | Événement | Effet |
 |---|---|
@@ -250,18 +251,20 @@ poids = 16 + 95 × taux d'erreur
 
 `BOX_INTERVALS = [0, 1, 3, 7, 14, 30]` jours.
 
-### 5.7 Mode IA (`ai-connector.js` + `server/server.js`)
+### 5.6 Génération IA (`server/ai/*`, `ai-connector.js`)
 
 ```
-Navigateur ──POST /api/generate──► serveur Node ──► fournisseur OpenAI-compatible
-   { text, count, chapterTitle }        (clé API côté serveur)      { questions: [...] }
+Navigateur ──POST /api/generate──► serveur Node ──► opencode run  (local, sans clé)
+    { text, count, chapterTitle }        │         └─► fournisseur OpenAI-compatible
+                                        └─ validation des citations « source »
 ```
 
-- Le serveur limite le corps à **3 Mo**, le nombre de questions à **5–60**, et exige
-  au moins 100 caractères de texte.
-- Le prompt impose un JSON strict ; `extractJson()` tolère les blocs Markdown.
-- Côté client, `normalizeQuestions()` vérifie : 4 options non vides et distinctes,
-  index de réponse valide, explication présente. Les questions invalides sont **ignorées**.
+- **opencode** : exécute `opencode run --standalone --format json --file cours.txt` dans un
+  répertoire temporaire avec permissions refusées ; la sortie NDJSON est parsée et validée.
+- **OpenAI-compatible** : clé API côté serveur (`OPENAI_API_KEY`), jamais dans le navigateur.
+- Sécurité serveur : limitation de débit (30 requêtes / 10 min par IP par défaut), limite de
+  corps (5 Mo), validation/normalisation des questions, en-têtes de sécurité et CSP, CORS
+  + pré-requêtes `OPTIONS`.
 
 ---
 
@@ -269,47 +272,52 @@ Navigateur ──POST /api/generate──► serveur Node ──► fournisseur 
 
 ```
 CRT/
-├── index.html                 # Interface complète (6 vues, accessibilité ARIA)
-├── style.css                  # Thème sombre, responsive, prefers-reduced-motion
-├── app.js                     # Navigation, import, session de quiz, rendu
+├── index.html                 # Interface (vues, PWA, accessibilité ARIA)
+├── style.css                  # Thème sombre/clair, responsive
+├── app.js                     # Navigation, quiz continu, résultats, réglages
 ├── docx-reader.js             # Extraction de texte .docx (ZIP natif, repli Mammoth)
-├── question-generator.js      # Génération locale de questions + normalisation du preset
-├── quiz-engine.js             # Moteur pur : sélection pondérée, correction, messages
-├── progress-manager.js        # Persistance, statistiques, répétition espacée, export
-├── ai-connector.js            # Client du proxy IA + validation des questions reçues
+├── question-generator.js      # Génération locale de questions + normalisation preset
+├── quiz-engine.js             # Moteur pur : sélection pondérée, correction multi-réponses
+├── progress-manager.js        # Persistance, statistiques, SRS, activité, export
+├── ai-connector.js            # Client de l'API IA + validation des questions reçues
+├── manifest.webmanifest       # Manifeste PWA
+├── sw.js                      # Service worker (cache hors ligne, /api en réseau)
 ├── data/
 │   └── preset-course.js       # Banque CRT 2024 (9 chapitres, 140 questions)
+├── icons/                     # Icônes PWA (générées)
 ├── server/
-│   └── server.js              # Serveur statique + proxy /api/generate (zéro dépendance)
+│   ├── server.js              # Serveur statique + API (/api/generate, /api/ai/status)
+│   └── ai/
+│       ├── index.js           # Orchestration, validation, limitation de débit
+│       ├── opencode.js        # Fournisseur opencode local
+│       ├── openai.js          # Fournisseur OpenAI-compatible
+│       └── prompt.js          # Construction du prompt et validation des citations
+├── tools/
+│   └── generate-icons.js      # Génération des icônes PNG sans dépendance
 ├── tests/
-│   ├── test-logic.js          # 23 tests Node (extraction, génération, moteur, SRS)
-│   ├── headless.html          # Test d'intégration navigateur (via le serveur local)
+│   ├── test-logic.js          # 25 tests (extraction, génération, moteur, SRS)
+│   ├── test-opencode.js       # 11 tests IA (faux binaire, validation, débit)
+│   ├── fixtures/fake-opencode.js
+│   ├── headless.html          # Test d'intégration navigateur
 │   └── preview-generation.js  # Aperçu console des questions générées
-├── CRT 2024.docx              # Cours source de démonstration
-└── .gitignore
+├── .github/workflows/
+│   ├── ci.yml                 # Tests Node (20/22)
+│   └── static.yml             # Déploiement GitHub Pages
+├── package.json               # Scripts start/test/check (aucune dépendance)
+└── CRT 2024.docx              # Cours source de démonstration
 ```
 
-### Rôle des modules
-
-| Module | Responsabilité | Dépend du DOM ? |
-|---|---|---|
-| `docx-reader.js` | Fichier → texte | Non (Web API seulement) |
-| `question-generator.js` | Texte → banque de questions | Non |
-| `quiz-engine.js` | Banque + stats → session, correction | Non |
-| `progress-manager.js` | État persistant, statistiques, export | Non (storage injectable) |
-| `ai-connector.js` | Appel du proxy, validation | Non (`fetch`) |
-| `app.js` | Orchestration et interface | **Oui** |
-
-Les cinq premiers modules sont en UMD : utilisables dans le navigateur **et** dans Node,
-ce qui permet de les tester sans DOM.
+Les modules cœur (`docx-reader`, `question-generator`, `quiz-engine`, `progress-manager`,
+`ai-connector`) sont en UMD : utilisables dans le navigateur **et** dans Node.
 
 ---
 
 ## 7. Données et confidentialité
 
 - **Aucun envoi réseau** en mode local : le DOCX est lu et découpé dans le navigateur.
-- En mode IA, seul le **texte du chapitre** (12 000 caractères max) est transmis au proxy.
-- La clé API ne quitte jamais le serveur ; elle n'est jamais écrite dans le navigateur.
+- En mode IA, seul le **texte du chapitre** (60 000 caractères max) est transmis au serveur
+  local, qui peut l'envoyer à opencode (local) ou à un fournisseur configuré.
+- La clé API (mode OpenAI) ne quitte jamais le serveur ; elle n'est jamais écrite dans le navigateur.
 - Progression et banques de questions vivent dans `localStorage` :
 
 | Clé | Contenu |
@@ -317,107 +325,73 @@ ce qui permet de les tester sans DOM.
 | `quizmaster.v1` | Statistiques, historique, réglages, métadonnées des cours |
 | `quizmaster.v1.bank.<id>` | Banque de questions d'un cours importé |
 
-> Conséquence : la progression est **propre à chaque navigateur**. Pour changer d'appareil,
-> utilise **Réglages → Exporter ma progression**, puis **Importer une sauvegarde**.
-
-Format d'export :
-
-```json
-{
-  "app": "quiz-master",
-  "version": 1,
-  "exportedAt": 1730000000000,
-  "state": { "documents": [], "quizzes": [], "questionStats": {}, "settings": {} },
-  "banks": { "<documentId>": { "document": {}, "chapters": [] } }
-}
-```
+> La progression est **propre à chaque navigateur**. Pour changer d'appareil, utilise
+> **Réglages → Exporter ma progression**, puis **Importer une sauvegarde**.
 
 ---
 
 ## 8. Tests
 
-### Tests de logique (Node, aucune dépendance)
+### Vérification syntaxique et tests (Node, aucune dépendance)
 
 ```powershell
-node tests/test-logic.js
+npm run check   # node --check sur les modules principaux
+npm test        # tests/test-logic.js + tests/test-opencode.js
 ```
 
-Résultat attendu : **23 réussis, 0 échoué**. Couverture :
+Résultat attendu : **25 + 11 réussis, 0 échoué**. Couverture :
 
 - extraction du DOCX réel et détection des chapitres ;
-- validité de la banque préchargée (140 questions, ≥ 10 par chapitre) ;
-- génération locale : richesse, diversité des types, déterminisme ;
-- moteur : 10 questions sans doublon, mélange des options, filtrage par chapitre,
-  priorité aux questions inédites, retour des questions échouées ;
+- validité de la banque préchargée et génération locale (déterminisme, types) ;
+- moteur : sessions sans doublon, mélange, réponses multiples (exact/partiel/trop large),
+  sélection adaptative, questions échouées, mode révision ;
 - correction et messages de résultat ;
-- répétition espacée, historique, statistiques, progression par chapitre ;
+- répétition espacée, activité jour/semaine, historique, statistiques, progression par chapitre ;
 - export / import / réinitialisation ;
-- simulation de 10 sessions successives.
+- simulation de 10 sessions successives ;
+- fournisseur opencode : détection, parsing NDJSON, validation des citations, génération
+  avec faux binaire, limitation de débit.
 
-### Aperçu des questions générées
+Les tests IA utilisent `tests/fixtures/fake-opencode.js` : aucun réseau, aucun appel réel
+au modèle.
+
+### Tests navigateur
 
 ```powershell
-node tests/preview-generation.js
+npm start
+# puis ouvrir http://localhost:8787/tests/headless.html
 ```
-
-### Test d'intégration navigateur
-
-Lance le serveur, puis ouvre **http://localhost:8787/tests/headless.html**.
-La page pilote l'application dans une iframe : navigation, quiz complet, import réel du
-DOCX, export de sauvegarde, bibliothèque.
 
 ---
 
 ## 9. Déploiement
 
-L'application étant statique, tout hébergement de fichiers convient. Le proxy IA, lui,
-nécessite un environnement Node ou une fonction serverless.
-
 ### GitHub Pages (gratuit, sans backend)
 
-Le dépôt contient déjà le workflow `.github/workflows/static.yml` : chaque push sur `main`
-publie la racine du dépôt sur GitHub Pages.
+Le workflow `.github/workflows/static.yml` publie la racine du dépôt sur GitHub Pages à
+chaque push sur `main` (ou manuellement depuis l'onglet **Actions**).
 
-1. `Settings → Pages` → Source : **GitHub Actions**
-2. Pousser sur `main`, ou lancer le workflow manuellement depuis l'onglet **Actions**
-3. URL : `https://<utilisateur>.github.io/quizz-master/`
+- `Settings → Pages` → Source : **GitHub Actions**
+- URL : `https://<utilisateur>.github.io/<repo>/`
+- Fonctionne en mode **local** (génération dans le navigateur). L'IA (opencode/proxy) n'est
+  pas disponible : il n'y a pas de serveur.
 
-Fonctionne sans configuration (chemins relatifs). **L'IA n'est pas disponible** :
-il n'y a pas de serveur pour détenir la clé. Le workflow publie tout le dépôt
-(`tests/`, le `.docx` inclus) ; restreindre `path` dans le workflow si besoin.
+### Application + IA (Node)
 
-### Render / Railway / Fly.io (application + IA)
+```powershell
+node server/server.js
+# Variables utiles : PORT, HOST, AI_PROVIDER, OPENCODE_MODEL, OPENAI_API_KEY, OPENAI_MODEL
+```
 
-| Réglage | Valeur |
-|---|---|
-| Build command | *(vide)* |
-| Start command | `node server/server.js` |
-| Variables | `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_BASE_URL` |
+Sur un hébergeur Node (Render, Railway, Fly.io…), commande de démarrage
+`node server/server.js` : le serveur écoute `process.env.PORT`. Application et API partagent
+la même origine. Si tu exposes le serveur publiquement, garde la limitation de débit active
+et protège l'accès selon ton besoin.
 
-Le serveur écoute déjà `process.env.PORT`. Application et proxy partagent la même origine :
-**aucun problème de CORS**. (Sur l'offre gratuite Render, le service s'endort après
-inactivité : le premier chargement est lent.)
+### Statique + fonction serverless
 
-### Netlify / Vercel / Cloudflare Pages (statique + fonction)
-
-- Application : build vide, répertoire de publication `.` (ou glisser-déposer le dossier).
-- IA : convertir `server/server.js` en fonction serverless (`netlify/functions/generate.js`,
-  `api/generate.js` sur Vercel, `functions/api/generate.js` sur Cloudflare).
-
-La fonction doit impérativement :
-
-- lire la clé dans les variables d'environnement ;
-- répondre aux requêtes **`OPTIONS`** (preflight) ;
-- renvoyer `Access-Control-Allow-Origin` pour l'origine de l'application.
-
-> ⚠️ `server/server.js` ne gère pas encore CORS : en l'état, un déploiement « statique
-> sur un domaine + proxy sur un autre » est bloqué par le navigateur.
-
-### Avant de publier
-
-- Ne jamais committer de clé API (`.gitignore` couvre déjà `.env`).
-- Définir un quota/budget côté fournisseur IA.
-- Vérifier que `CRT 2024.docx` peut être distribué (droits sur le contenu).
+Possible en portant `server/ai/*` + la route `/api/generate` vers une fonction
+(Netlify/Vercel/Cloudflare). `server/server.js` gère déjà CORS et les pré-requêtes `OPTIONS`.
 
 ---
 
@@ -425,70 +399,50 @@ La fonction doit impérativement :
 
 | Symptôme | Cause probable | Solution |
 |---|---|---|
-| `EADDRINUSE :::8787` | Un serveur tourne déjà | Utiliser `$env:PORT=9000` ou fermer l'ancien processus |
+| `EADDRINUSE :::8787` | Un serveur tourne déjà | Changer `PORT` ou fermer l'ancien processus |
 | « Stockage local indisponible » | Navigation privée / cookies bloqués | Autoriser le stockage ou exporter la progression |
-| « Texte de cours trop court » | Document quasi vide | Vérifier que le texte est dans le corps du DOCX (pas dans des images) |
-| Aucune question générée | Document sans titres ni listes exploitables | Ajouter des titres `CHAPITRE`/`PARTIE`, ou activer l'IA |
-| IA : `503` | `OPENAI_API_KEY` absente | Définir la variable **avant** de lancer le serveur |
-| IA : erreur réseau / CORS | Proxy sur un autre domaine | Héberger l'app et le proxy sur la même origine, ou ajouter CORS |
-| Questions IA rejetées | Réponse non conforme | Vérifier le modèle ; le client écarte les questions incomplètes |
+| « Texte de cours trop court » | Document quasi vide | Vérifier que le texte est dans le corps du DOCX |
+| Aucune question générée | Document peu structuré | Ajouter des titres/listes, ou activer l'IA |
+| opencode « introuvable » | opencode absent ou serveur non lancé | Installer opencode, ouvrir via `http://localhost:8787`, vérifier `OPENCODE_BIN` |
+| IA : `503` / erreur fournisseur | Pas de fournisseur disponible | Installer opencode ou définir `OPENAI_API_KEY` côté serveur |
+| IA lente / timeout | Génération longue | Réduire le nombre de questions, attendre 1–2 min, vérifier le modèle |
+| Questions IA peu nombreuses | Citations non vérifiables écartées | Normal : seules les questions sourcées dans le cours sont conservées |
+| PWA non installable | Ouvert en `file://` | Ouvrir via le serveur local (HTTPS/localhost) |
 
 ---
 
 ## 11. Limites connues
 
-- **Pas de synchronisation multi-appareils** : la progression est locale au navigateur
-  (export/import manuel uniquement).
-- **Pas de mode hors-ligne** : aucune PWA / service worker pour l'instant.
+- **Pas de synchronisation multi-appareils** : progression locale au navigateur (export/import manuel).
+- **Hors-ligne partiel** : l'interface est mise en cache, mais la génération IA et l'import
+  enrichi par IA nécessitent réseau/serveur.
 - **Extraction limitée à DOCX / TXT / MD** : pas de PDF, ODT, PPTX ni `.doc` ancien.
-- **Génération locale heuristique** : pas de compréhension sémantique ; les questions sont
-  littérales et parfois répétitives sur les documents peu structurés.
-- **Pas de difficulté progressive** : les 10 questions sont tirées pondérément, sans niveau.
-- **CORS absent** côté serveur (voir §9).
-- **Pas de limitation de débit** sur `/api/generate` : à protéger avant exposition publique.
-- **Accessibilité partielle** : ARIA présent, mais pas d'audit lecteur d'écran ni de
-  gestion fine du focus après validation.
-- **Tests** : logique couverte, mais pas de tests unitaires pour `ai-connector.js` ni
-  d'E2E automatisé (Playwright).
+- **Génération locale heuristique** : pas de compréhension sémantique ; qualité dépend de la
+  structure du document.
+- **Pas de comptes ni de partage** de banques entre utilisateurs.
+- **Tests navigateur** : logique couverte en Node, page d'intégration manuelle disponible mais
+  pas d'E2E automatisé (Playwright).
 
 ---
 
 ## 12. Feuille de route
 
-### Priorité haute — robustesse et déploiement
+### Réalisé récemment
+- [x] Quiz continu multi-réponses avec **résultats détaillés de toutes les questions** à la fin.
+- [x] Fournisseur **opencode local** (`opencode run`, sans clé API), validation des citations.
+- [x] CORS + `OPTIONS`, limitation de débit, timeout IA, en-têtes de sécurité/CSP.
+- [x] `package.json` + CI GitHub Actions (Node 20/22).
+- [x] PWA (manifest, service worker, icônes) et thème sombre/clair/auto.
+- [x] Objectif quotidien, graphique d'activité 7 jours, nombre de questions configurable.
+- [x] Export des questions en **CSV** et **Anki**.
 
-- [ ] **CORS + `OPTIONS`** dans `server/server.js` (déploiement découplé).
-- [ ] **`package.json`** avec `start`, `test`, `engines` + **CI GitHub Actions**
-      (tests sur chaque push).
-- [ ] **Limitation de débit** et **timeout** sur l'appel IA (protection du proxy public).
-- [ ] Tests unitaires `ai-connector.js` + E2E Playwright des parcours.
-- [ ] `Content-Security-Policy` et en-têtes de sécurité dans `server.js`.
-
-### Priorité moyenne — expérience utilisateur
-
-- [ ] **PWA** : `manifest.json` + service worker → installation et révision hors-ligne.
-- [ ] **Thème clair / sombre** avec `prefers-color-scheme` et bascule manuelle.
-- [ ] **Objectif quotidien** (« 10 questions par jour ») et rappel de révision.
-- [ ] **Graphiques de progression** (évolution de la précision, heatmap d'activité).
-- [ ] **Sauvegarde automatique** de la progression (File System Access API ou export planifié).
-- [ ] Amélioration de l'accessibilité : focus après validation, annonces `aria-live`,
-      contrastes, navigation clavier complète.
-
-### Priorité moyenne — contenu
-
-- [ ] Import **PDF / ODT / PPTX** et import multiple en une fois.
-- [ ] **Régénération ciblée** d'un chapitre sans réimporter tout le cours.
-- [ ] **Difficulté adaptative** (facile/moyen/difficile) et paramétrage du nombre de questions.
-- [ ] Export des questions vers **Anki / CSV / PDF** pour réviser hors de l'application.
-- [ ] Mode **« cours »** : fiche de révision générée à partir des définitions et listes.
-
-### Plus tard — produit
-
-- [ ] **Comptes et synchronisation** multi-appareils (backend + base de données).
-- [ ] **Partage de banques de questions** entre utilisateurs (import par lien).
-- [ ] **Tableau de bord enseignant** : suivi d'un groupe, taux de réussite par notion.
-- [ ] **Internationalisation** (i18n) et prise en charge d'autres langues de cours.
-- [ ] Génération IA **par lot avec relecture** (aperçu avant ajout à la banque).
+### À faire
+- [ ] Import **PDF / ODT / PPTX** et import multiple amélioré.
+- [ ] Régénération ciblée d'un chapitre ; difficulté adaptative paramétrable.
+- [ ] Sauvegarde/export automatisé et synchronisation multi-appareils.
+- [ ] Partage de banques de questions, tableau de bord enseignant.
+- [ ] Internationalisation (i18n).
+- [ ] E2E automatisé (Playwright) et tests navigateur supplémentaires.
 
 ---
 

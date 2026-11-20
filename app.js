@@ -54,6 +54,9 @@
     date: 'Date clé',
     'list-count': 'Liste du cours',
     'list-odd': 'Liste du cours',
+    'list-multi': 'Plusieurs réponses',
+    acronym: 'Sigle',
+    'acronym-expansion': 'Sigle',
     curated: 'Question de cours',
     ai: 'Question IA',
     general: 'Notion clé'
@@ -68,11 +71,10 @@
     session: null,
     index: 0,
     answers: [],
-    selected: null,
-    answered: false,
     quizStart: 0,
-    quizCorrect: 0,
     lastResult: null,
+    lastResultDuration: 0,
+    reviewFilter: 'all',
     lastConfig: null,
     toastTimer: null,
     importing: false
@@ -92,6 +94,16 @@
     }
 
     bindEvents();
+    applyTheme(App.progress.state.settings.theme || 'dark');
+    if (typeof window.matchMedia === 'function') {
+      const media = window.matchMedia('(prefers-color-scheme: light)');
+      const listener = () => {
+        if ((App.progress.state.settings.theme || 'dark') === 'auto') applyTheme('auto');
+      };
+      if (media.addEventListener) media.addEventListener('change', listener);
+      else if (media.addListener) media.addListener(listener);
+    }
+    registerServiceWorker();
     updateStoragePill();
     renderHome();
     navigate('home');
@@ -216,6 +228,89 @@
     return 'Expert';
   }
 
+  /* --------------------------- Thème et objectif ------------------------- */
+
+  const THEMES = ['dark', 'light', 'auto'];
+
+  function resolveTheme(theme) {
+    if (theme === 'auto') {
+      return typeof window.matchMedia === 'function' && window.matchMedia('(prefers-color-scheme: light)').matches
+        ? 'light'
+        : 'dark';
+    }
+    return theme === 'light' ? 'light' : 'dark';
+  }
+
+  function applyTheme(theme) {
+    const resolved = resolveTheme(theme);
+    document.documentElement.dataset.theme = resolved;
+    const button = $('#theme-toggle');
+    if (!button) return;
+    button.textContent = resolved === 'light' ? '☀' : '☾';
+    button.title = 'Thème : ' + (theme === 'auto' ? 'auto (' + resolved + ')' : resolved);
+    button.setAttribute('aria-label', 'Thème ' + resolved + ' — cliquer pour changer');
+  }
+
+  function cycleTheme() {
+    const current = App.progress.state.settings.theme || 'dark';
+    const next = THEMES[(THEMES.indexOf(current) + 1) % THEMES.length];
+    App.progress.updateSettings({ theme: next });
+    applyTheme(next);
+    showToast('Thème : ' + (next === 'auto' ? 'automatique' : next === 'light' ? 'clair' : 'sombre'), 'info', 1800);
+  }
+
+  function renderGoal() {
+    const card = $('#goal-card');
+    if (!card) return;
+    const goal = Math.max(0, Number(App.progress.state.settings.dailyGoal) || 0);
+    if (!goal) {
+      card.hidden = true;
+      return;
+    }
+    card.hidden = false;
+    const today = App.progress.getDailyProgress();
+    const percent = Math.min(100, Math.round((today.answered / goal) * 100));
+    $('#goal-bar').style.width = percent + '%';
+    $('#goal-progress').setAttribute('aria-valuenow', String(percent));
+    $('#goal-value').textContent = today.answered + ' / ' + goal;
+    if (today.answered >= goal) {
+      $('#goal-text').textContent = '🎉 Objectif atteint : ' + today.answered + ' réponses aujourd’hui (' + today.accuracy + '% de réussite).';
+    } else if (today.answered > 0) {
+      $('#goal-text').textContent = today.answered + ' réponse' + (today.answered > 1 ? 's' : '') +
+        ' aujourd’hui · ' + today.accuracy + '% de réussite · encore ' + (goal - today.answered) + '.';
+    } else {
+      $('#goal-text').textContent = 'Aucune réponse aujourd’hui : lance un quiz pour démarrer.';
+    }
+  }
+
+  function renderWeekChart() {
+    const box = $('#week-chart');
+    if (!box) return;
+    clear(box);
+    const days = App.progress.getWeekActivity();
+    const max = Math.max(1, ...days.map((day) => day.answered));
+    const total = days.reduce((sum, day) => sum + day.answered, 0);
+    const totalNode = $('#week-total');
+    if (totalNode) totalNode.textContent = plural(total, 'réponse');
+
+    const labels = ['dim', 'lun', 'mar', 'mer', 'jeu', 'ven', 'sam'];
+    for (const day of days) {
+      const date = new Date(day.date);
+      const wrap = el('div', 'week-day');
+      const barWrap = el('div', 'week-bar-wrap');
+      const bar = el('div', 'week-bar' + (day.answered ? '' : ' is-empty'));
+      bar.style.height = Math.round((day.answered / max) * 100) + '%';
+      bar.title = day.answered + ' réponse' + (day.answered > 1 ? 's' : '');
+      barWrap.append(bar);
+      wrap.append(
+        el('span', 'week-value', String(day.answered)),
+        barWrap,
+        el('span', 'week-label', labels[date.getDay()])
+      );
+      box.append(wrap);
+    }
+  }
+
   function renderHome() {
     const stats = App.progress.getGlobalStats();
     $('#hero-accuracy').textContent = stats.accuracy + '%';
@@ -240,6 +335,7 @@
     $('#stat-due').textContent = countDueQuestions();
 
     renderContinueCards();
+    renderGoal();
 
     if (App.documents.length === 0) {
       const hintEl = $('#hero-hint');
@@ -455,12 +551,14 @@
 
     const stats = App.progress.state.questionStats;
     const recent = App.progress.state.recent;
+    const settings = App.progress.state.settings || {};
+    const count = Math.max(1, Math.min(50, Number(settings.quizCount) || QUESTIONS_PER_QUIZ));
     let session = null;
 
     try {
       if (mode === 'review') {
         session = QuizEngine.buildReviewSession(questions, stats, {
-          count: QUESTIONS_PER_QUIZ,
+          count,
           chapterId,
           documentId: docId,
           recent
@@ -473,7 +571,7 @@
         session = QuizEngine.buildSession({
           questions,
           chapterId,
-          count: QUESTIONS_PER_QUIZ,
+          count,
           stats,
           recent,
           fallbackQuestions: questions,
@@ -488,14 +586,11 @@
 
     App.session = session;
     App.index = 0;
-    App.answers = new Array(session.items.length).fill(null);
-    App.selected = null;
-    App.answered = false;
+    App.answers = session.items.map(() => []);
     App.quizStart = Date.now();
-    App.quizCorrect = 0;
     App.lastConfig = { docId, chapterId, mode };
 
-    if (session.delivered < QUESTIONS_PER_QUIZ) {
+    if (session.delivered < count) {
       showToast('Seulement ' + session.delivered + ' question(s) disponible(s) dans ce cours.', 'info', 5000);
     }
 
@@ -519,10 +614,11 @@
 
     const total = App.session.delivered;
     const position = App.index + 1;
+    const correctCount = (item.answerIndices || [item.answerIndex]).length;
 
     $('#quiz-chapter').textContent = currentDocumentName(App.session.documentId) + ' · ' + sessionChapterTitle();
     $('#quiz-counter').textContent = position + ' / ' + total;
-    $('#quiz-score').textContent = App.quizCorrect + (App.quizCorrect === 1 ? ' bonne réponse' : ' bonnes réponses');
+    $('#quiz-score').textContent = correctCount > 1 ? 'Plusieurs réponses' : 'Une seule réponse';
 
     const progress = $('#quiz-progress');
     progress.setAttribute('aria-valuemax', String(total));
@@ -532,36 +628,36 @@
     $('#question-type').textContent = TYPE_LABELS[item.question.kind] || 'Question';
     $('#question-source').textContent = item.question.source || '';
     $('#question-text').textContent = item.question.text;
+    $('#question-text').tabIndex = -1;
 
     const optionsBox = $('#options');
     clear(optionsBox);
+    const selected = App.answers[App.index] || [];
 
     item.options.forEach((option, index) => {
       const button = el('button', 'option');
       button.type = 'button';
       button.dataset.index = String(index);
-      button.setAttribute('aria-pressed', 'false');
+      const isSelected = selected.includes(index);
+      button.classList.toggle('is-selected', isSelected);
+      button.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
       const letter = el('span', 'option-letter', String.fromCharCode(65 + index));
       const text = el('span', 'option-text', option.text);
-      button.append(letter, text);
+      const check = el('span', 'option-check', '✓');
+      button.append(letter, text, check);
       button.addEventListener('click', () => selectOption(index));
       optionsBox.append(button);
     });
 
-    const feedback = $('#feedback');
-    feedback.hidden = true;
-    feedback.className = 'feedback';
-    clear(feedback);
+    const hint = $('#keyboard-hint');
+    hint.textContent = correctCount > 1
+      ? 'Sélectionne une ou plusieurs réponses (touches 1-4), puis clique sur Suivant'
+      : 'Sélectionne une réponse (touches 1-4 ou A-D), puis clique sur Suivant';
 
-    const validateBtn = $('#validate-btn');
-    validateBtn.hidden = false;
-    validateBtn.disabled = true;
     const nextBtn = $('#next-btn');
-    nextBtn.hidden = true;
-    nextBtn.textContent = position === total ? 'Voir mes résultats' : 'Question suivante';
-
-    App.selected = null;
-    App.answered = false;
+    nextBtn.hidden = false;
+    nextBtn.textContent = position === total ? 'Voir mes résultats' : 'Suivant';
+    updateNextState();
 
     const card = $('#question-card');
     card.style.animation = 'none';
@@ -569,71 +665,43 @@
     card.style.animation = '';
   }
 
+  function updateNextState() {
+    const nextBtn = $('#next-btn');
+    if (!nextBtn) return;
+    const selected = App.answers[App.index] || [];
+    nextBtn.classList.toggle('is-empty', selected.length === 0);
+    nextBtn.title = selected.length === 0
+      ? 'Aucune réponse sélectionnée : cette question comptera comme fausse.'
+      : '';
+  }
+
   function selectOption(index) {
-    if (App.answered || !App.session) return;
-    const items = App.session.items[App.index];
-    if (!items || index < 0 || index >= items.options.length) return;
-    App.selected = index;
+    if (!App.session) return;
+    const item = App.session.items[App.index];
+    if (!item || index < 0 || index >= item.options.length) return;
+
+    const current = App.answers[App.index] || [];
+    const next = current.includes(index)
+      ? current.filter((value) => value !== index)
+      : [...current, index].sort((a, b) => a - b);
+    App.answers[App.index] = next;
+
     $$('#options .option').forEach((button, optionIndex) => {
-      const isSelected = optionIndex === index;
+      const isSelected = next.includes(optionIndex);
       button.classList.toggle('is-selected', isSelected);
       button.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
     });
-    $('#validate-btn').disabled = false;
-  }
-
-  function validateAnswer() {
-    if (App.answered || !App.session || App.selected === null) return;
-    const item = App.session.items[App.index];
-    const chosen = App.selected;
-    const isCorrect = chosen === item.answerIndex;
-
-    App.answered = true;
-    App.answers[App.index] = chosen;
-    if (isCorrect) App.quizCorrect++;
-
-    $$('#options .option').forEach((button, index) => {
-      button.disabled = true;
-      button.classList.remove('is-selected');
-      if (index === item.answerIndex) button.classList.add('is-correct');
-      else if (index === chosen) button.classList.add('is-wrong');
-      else button.classList.add('is-dimmed');
-      button.setAttribute('aria-pressed', index === chosen ? 'true' : 'false');
-    });
-
-    const feedback = $('#feedback');
-    feedback.className = 'feedback ' + (isCorrect ? 'is-correct' : 'is-wrong');
-    clear(feedback);
-
-    const head = el('div', 'feedback-head');
-    head.append(el('span', '', isCorrect ? '✓' : '✕'), el('span', '', isCorrect ? 'Bonne réponse !' : 'Réponse incorrecte'));
-    const explanation = el('p', '', item.question.explanation || 'Aucune explication disponible pour cette question.');
-    if (!isCorrect) {
-      explanation.prepend(el('span', 'correct-answer', 'Bonne réponse : ' + item.options[item.answerIndex].text + '. '));
-    }
-    feedback.append(head, explanation);
-    if (item.question.source) feedback.append(el('span', 'feedback-source', 'Référence : ' + item.question.source));
-    feedback.hidden = false;
-
-    App.progress.recordAnswer(item.question, isCorrect);
-
-    $('#quiz-score').textContent = App.quizCorrect + (App.quizCorrect === 1 ? ' bonne réponse' : ' bonnes réponses');
-    $('#quiz-progress').setAttribute('aria-valuenow', String(App.index + 1));
-    $('#quiz-progress-bar').style.width = (((App.index + 1) / App.session.delivered) * 100) + '%';
-    $('#validate-btn').hidden = true;
-    const nextBtn = $('#next-btn');
-    nextBtn.hidden = false;
-    nextBtn.textContent = App.index + 1 === App.session.delivered ? 'Voir mes résultats' : 'Question suivante';
-    nextBtn.focus({ preventScroll: true });
+    updateNextState();
   }
 
   function nextQuestion() {
     if (!App.session) return;
-    if (!App.answered) return;
     if (App.index + 1 < App.session.delivered) {
       App.index++;
       renderQuestion();
       window.scrollTo({ top: 0, behavior: 'smooth' });
+      const title = $('#question-text');
+      if (title) title.focus({ preventScroll: true });
     } else {
       finishQuiz();
     }
@@ -647,6 +715,11 @@
     let chapterTitle = sessionChapterTitle();
     if (App.lastConfig && App.lastConfig.mode === 'review') chapterTitle = 'Révision ciblée';
     if (bank && App.session.chapterId === 'all') chapterTitle = 'Toutes les parties';
+
+    // Les réponses sont enregistrées en une seule fois, à la fin du quiz.
+    for (const detail of evaluation.details) {
+      App.progress.recordAnswer(detail.question, detail.isCorrect);
+    }
 
     App.progress.recordQuiz({
       id: App.session.id,
@@ -666,7 +739,10 @@
 
     App.lastResult = evaluation;
     App.lastResultDuration = durationMs;
+    App.reviewFilter = 'all';
     navigate('results');
+    const title = $('#results-title');
+    if (title) title.focus({ preventScroll: true });
   }
 
   /* ====================================================================== */
@@ -705,30 +781,88 @@
       kpis.append(card);
     }
 
-    $('#missed-count').textContent = plural(result.missed.length, 'question');
-    const list = $('#missed-list');
-    clear(list);
-    $('#missed-empty').hidden = result.missed.length !== 0;
+    const details = result.details || [];
+    const wrong = details.filter((detail) => !detail.isCorrect);
+    $('#results-count').textContent = details.length + ' question' + (details.length > 1 ? 's' : '');
+    $('#results-wrong-count').textContent = String(wrong.length);
 
-    for (const detail of result.missed) {
-      const item = el('article', 'missed-item');
-      item.append(el('p', 'missed-q', detail.question.text));
+    $$('#results-filter [data-filter]').forEach((button) => {
+      const active = button.dataset.filter === App.reviewFilter;
+      button.classList.toggle('is-active', active);
+      button.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
 
-      const chosen = detail.chosen === null ? 'Aucune réponse' : detail.options[detail.chosen].text;
-      const badLine = el('p', 'answer-line is-bad');
-      badLine.append(el('strong', '', 'Ta réponse : '), document.createTextNode(chosen));
-      const goodLine = el('p', 'answer-line is-good');
-      goodLine.append(el('strong', '', 'Bonne réponse : '), document.createTextNode(detail.options[detail.answerIndex].text));
-
-      const explanation = el('p', 'missed-explanation', detail.question.explanation || '');
-      if (detail.question.source) explanation.append(el('span', 'src', 'Référence : ' + detail.question.source));
-      item.append(badLine, goodLine, explanation);
-      list.append(item);
-    }
+    renderResultsList(App.reviewFilter);
 
     const reviewBtn = $('#review-errors-btn');
-    reviewBtn.disabled = result.missed.length === 0;
-    reviewBtn.title = result.missed.length === 0 ? 'Aucune erreur à réviser.' : 'Relancer un quiz sur tes erreurs';
+    reviewBtn.disabled = wrong.length === 0;
+    reviewBtn.title = wrong.length === 0 ? 'Aucune erreur à réviser.' : 'Relancer un quiz sur tes erreurs';
+  }
+
+  function renderResultsList(filter) {
+    const result = App.lastResult;
+    if (!result) return;
+    const list = $('#results-list');
+    if (!list) return;
+    clear(list);
+
+    const details = result.details || [];
+    const visible = filter === 'wrong' ? details.filter((detail) => !detail.isCorrect) : details;
+
+    $('#results-empty').hidden = visible.length !== 0;
+    if (visible.length === 0) {
+      $('#results-empty').textContent = '🎉 Aucune erreur : toutes les réponses étaient justes.';
+      return;
+    }
+
+    visible.forEach((detail) => {
+      const index = details.indexOf(detail);
+      const item = el('article', 'review-item ' + (detail.isCorrect ? 'is-correct' : 'is-wrong'));
+
+      const head = el('div', 'review-head');
+      head.append(el('span', 'review-index', 'Question ' + (index + 1)));
+      head.append(el('span', 'review-status', detail.isCorrect ? '✓ Correct' : '✕ Incorrect'));
+      if (detail.question.source) head.append(el('span', 'review-source', detail.question.source));
+      item.append(head);
+
+      item.append(el('p', 'review-q', detail.question.text));
+
+      const options = el('ul', 'review-options');
+      detail.options.forEach((option, optionIndex) => {
+        const isCorrect = (detail.answerIndices || []).includes(optionIndex);
+        const isChosen = (detail.chosenIndices || []).includes(optionIndex);
+        const line = el('li', 'review-option');
+        if (isCorrect) line.classList.add('is-correct');
+        if (isChosen) line.classList.add('is-chosen');
+        if (isChosen && !isCorrect) line.classList.add('is-missed');
+        line.append(el('span', 'option-letter', String.fromCharCode(65 + optionIndex)));
+        line.append(el('span', 'option-text', option.text));
+        if (isCorrect) line.append(el('span', 'review-tag is-good', 'Bonne réponse'));
+        else if (isChosen) line.append(el('span', 'review-tag is-bad', 'Ton choix'));
+        options.append(line);
+      });
+      item.append(options);
+
+      const answers = el('div', 'review-answers');
+      const chosenText = detail.chosenTexts && detail.chosenTexts.length
+        ? detail.chosenTexts.join(' · ')
+        : 'Aucune réponse';
+      const correctText = detail.correctTexts && detail.correctTexts.length
+        ? detail.correctTexts.join(' · ')
+        : '—';
+      const chosenLine = el('p', 'answer-line ' + (detail.isCorrect ? 'is-good' : 'is-bad'));
+      chosenLine.append(el('strong', '', 'Ta réponse : '), document.createTextNode(chosenText));
+      const correctLine = el('p', 'answer-line is-good');
+      correctLine.append(el('strong', '', detail.correctTexts.length > 1 ? 'Bonnes réponses : ' : 'Bonne réponse : '), document.createTextNode(correctText));
+      answers.append(chosenLine, correctLine);
+      item.append(answers);
+
+      if (detail.question.explanation) {
+        item.append(el('p', 'review-explanation', detail.question.explanation));
+      }
+
+      list.append(item);
+    });
   }
 
   function formatDuration(ms) {
@@ -766,9 +900,10 @@
       statsBox.append(card);
     }
 
+    renderWeekChart();
+
     const bank = getCurrentBank();
-    const docMeta = getDocumentMeta(App.currentDocId);
-    $('#dash-doc-name').textContent = docMeta ? docMeta.name : 'Aucun cours';
+    const docMeta = getDocumentMeta(App.currentDocId);    $('#dash-doc-name').textContent = docMeta ? docMeta.name : 'Aucun cours';
 
     const masteryList = $('#mastery-list');
     clear(masteryList);
@@ -841,15 +976,100 @@
   /*                                 RÉGLAGES                               */
   /* ====================================================================== */
 
+  function currentAiEndpoint() {
+    const settings = App.progress.state.settings;
+    if (settings.aiMode === 'opencode') {
+      if (location.protocol === 'http:' || location.protocol === 'https:') {
+        return location.origin + '/api/generate';
+      }
+      return 'http://localhost:8787/api/generate';
+    }
+    return settings.aiEndpoint || '';
+  }
+
+  function setAiStatus(message, type) {
+    const box = $('#ai-status');
+    if (!box) return;
+    box.className = 'ai-status-box' + (type ? ' is-' + type : '');
+    box.textContent = message;
+  }
+
+  function syncAiFields() {
+    const mode = $('#ai-mode') ? $('#ai-mode').value : 'local';
+    const proxy = $('#ai-proxy-fields');
+    const opencode = $('#ai-opencode-fields');
+    if (proxy) proxy.hidden = mode !== 'proxy';
+    if (opencode) opencode.hidden = mode !== 'opencode';
+  }
+
   function renderSettings() {
     const settings = App.progress.state.settings;
+    $('#ai-mode').value = settings.aiMode || 'local';
     $('#ai-endpoint').value = settings.aiEndpoint || '';
     $('#ai-enabled').checked = !!settings.aiEnabled;
+    $('#quiz-count').value = String(settings.quizCount || 10);
+    $('#daily-goal').value = String(settings.dailyGoal === undefined ? 20 : settings.dailyGoal);
+    syncAiFields();
     updateStorageMeter();
-    $('#ai-status').textContent = settings.aiEnabled
-      ? 'Mode IA activé : les nouveaux imports tenteront d’enrichir la banque via le proxy.'
-      : 'Mode local actif : toutes les questions sont générées dans le navigateur.';
-    $('#ai-status').className = 'hint';
+
+    if (settings.aiMode === 'opencode') {
+      loadAiStatus();
+    } else if (settings.aiMode === 'proxy') {
+      setAiStatus(settings.aiEnabled
+        ? 'Mode proxy activé : les imports tenteront d’enrichir la banque via ton proxy.'
+        : 'Mode proxy configuré mais désactivé.', '');
+    } else {
+      setAiStatus('Mode local actif : toutes les questions sont générées dans le navigateur, sans réseau.', '');
+    }
+  }
+
+  async function loadAiStatus() {
+    setAiStatus('Recherche du serveur local…', '');
+    try {
+      const response = await fetch('/api/ai/status', { cache: 'no-store' });
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+      const data = await response.json();
+      const opencode = data.opencode || {};
+      const models = Array.isArray(opencode.models) ? opencode.models : [];
+      const select = $('#ai-model');
+      if (select) {
+        const saved = App.progress.state.settings.aiModel || data.model || '';
+        clear(select);
+        if (models.length) {
+          for (const model of models) {
+            const option = el('option', '', model);
+            option.value = model;
+            select.append(option);
+          }
+          select.value = models.includes(saved) ? saved : models[0];
+        } else {
+          const option = el('option', '', saved || 'Modèle par défaut d’opencode');
+          option.value = saved;
+          select.append(option);
+        }
+      }
+
+      if (opencode.installed) {
+        setAiStatus(
+          'opencode détecté (v' + (opencode.version || '?') + ') · modèle du serveur : ' +
+          (data.model || 'défaut') + ' · aucune clé API requise.',
+          'ok'
+        );
+      } else {
+        setAiStatus(
+          'Serveur local joignable, mais opencode est introuvable' +
+          (opencode.error ? ' : ' + opencode.error : '.') +
+          ' Installe-le ou choisis un autre moteur.',
+          'error'
+        );
+      }
+    } catch (error) {
+      setAiStatus(
+        'Serveur local injoignable. Lance « node server/server.js » puis recharge la page. ' +
+        (error.message || ''),
+        'error'
+      );
+    }
   }
 
   function updateStorageMeter() {
@@ -968,9 +1188,12 @@
 
     // Enrichissement IA optionnel (proxy sécurisé, jamais de clé côté client).
     const settings = App.progress.state.settings;
-    if (settings.aiEnabled && settings.aiEndpoint) {
-      setDropzoneStatus(prefix + 'Enrichissement IA en cours…');
-      await enrichWithAi(bank, extracted.text, settings.aiEndpoint);
+    if (settings.aiEnabled && settings.aiMode !== 'local') {
+      const endpoint = currentAiEndpoint();
+      if (endpoint) {
+        setDropzoneStatus(prefix + 'Enrichissement IA en cours… (peut prendre 1 à 2 min)');
+        await enrichWithAi(bank, extracted.text, endpoint, settings.aiModel);
+      }
     }
 
     setDropzoneStatus(prefix + 'Enregistrement…');
@@ -991,7 +1214,7 @@
     return true;
   }
 
-  async function enrichWithAi(bank, text, endpoint) {
+  async function enrichWithAi(bank, text, endpoint, model) {
     try {
       const chaptersWithContent = QuestionGenerator.splitChapters(text);
       if (!chaptersWithContent.length) return;
@@ -1007,7 +1230,9 @@
             endpoint,
             text: source.content.slice(0, 11000),
             count: 10,
-            chapterTitle: target.title
+            chapterTitle: target.title,
+            model: model || '',
+            timeout: 180000
           });
           const existing = new Set(target.questions.map((q) => q.text.toLowerCase()));
           for (const question of generated) {
@@ -1018,6 +1243,7 @@
               text: question.text,
               options: question.options,
               answer: question.answer,
+              answers: question.answers,
               explanation: question.explanation,
               source: question.source || target.title,
               kind: 'ai',
@@ -1039,6 +1265,83 @@
       console.warn('Enrichissement IA ignoré :', error);
       showToast('IA indisponible : le quiz local reste complet. ' + error.message, 'info', 6000);
     }
+  }
+
+  function registerServiceWorker() {
+    if (!('serviceWorker' in navigator)) return;
+    if (location.protocol !== 'http:' && location.protocol !== 'https:') return;
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js').catch((error) => {
+        console.warn('Service worker non enregistré :', error.message);
+      });
+    });
+  }
+
+  function downloadFile(name, content, type) {
+    const blob = new Blob([content], { type: type || 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = name;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  }
+
+  function csvCell(value) {
+    return '"' + String(value === undefined || value === null ? '' : value).replace(/"/g, '""') + '"';
+  }
+
+  function exportQuestions(format) {
+    const bank = getCurrentBank();
+    if (!bank || !bank.chapters.length) {
+      setStatus('#data-status', 'Aucun cours actif à exporter.', 'error');
+      return;
+    }
+    const date = new Date().toISOString().slice(0, 10);
+    const base = (bank.document.name || 'quiz-master').replace(/[^\w\-]+/g, '-').slice(0, 50);
+    const rows = [];
+
+    if (format === 'anki') {
+      for (const chapter of bank.chapters) {
+        for (const question of chapter.questions) {
+          const correct = QuizEngine.correctIndices(question)
+            .map((index) => String.fromCharCode(65 + index))
+            .join(', ');
+          const front = question.text + '<br>' +
+            question.options.map((option, index) => String.fromCharCode(65 + index) + '. ' + option).join('<br>');
+          const back = 'Réponse : ' + correct + (question.explanation ? '<br><br>' + question.explanation : '');
+          rows.push(front + '\t' + back);
+        }
+      }
+      downloadFile('quizmaster-anki-' + date + '.txt', rows.join('\n'), 'text/tab-separated-values;charset=utf-8');
+      setStatus('#data-status', rows.length + ' question(s) exportée(s) pour Anki.', 'ok');
+      return;
+    }
+
+    rows.push(['Chapitre', 'Question', 'A', 'B', 'C', 'D', 'Réponses', 'Explication', 'Référence'].map(csvCell).join(','));
+    for (const chapter of bank.chapters) {
+      for (const question of chapter.questions) {
+        const correct = QuizEngine.correctIndices(question)
+          .map((index) => String.fromCharCode(65 + index))
+          .join(' ');
+        rows.push([
+          chapter.title,
+          question.text,
+          question.options[0],
+          question.options[1],
+          question.options[2],
+          question.options[3],
+          correct,
+          question.explanation || '',
+          question.source || ''
+        ].map(csvCell).join(','));
+      }
+    }
+    // BOM UTF-8 pour qu'Excel affiche correctement les accents.
+    downloadFile('quizmaster-questions-' + date + '.csv', '\ufeff' + rows.join('\r\n'), 'text/csv;charset=utf-8');
+    setStatus('#data-status', (rows.length - 1) + ' question(s) exportée(s) en CSV.', 'ok');
   }
 
   /* ====================================================================== */
@@ -1183,7 +1486,7 @@
     });
 
     $('#quit-quiz').addEventListener('click', () => {
-      if (!window.confirm('Quitter le quiz en cours ? Les réponses déjà validées sont enregistrées, le quiz ne sera pas comptabilisé.')) return;
+      if (!window.confirm('Quitter le quiz en cours ? Les réponses de cette session ne seront pas enregistrées.')) return;
       App.session = null;
       navigate('library');
     });
@@ -1194,8 +1497,22 @@
       selectOption(Number(button.dataset.index));
     });
 
-    $('#validate-btn').addEventListener('click', validateAnswer);
     $('#next-btn').addEventListener('click', nextQuestion);
+
+    const filterBox = $('#results-filter');
+    if (filterBox) {
+      filterBox.addEventListener('click', (event) => {
+        const button = event.target.closest('[data-filter]');
+        if (!button) return;
+        App.reviewFilter = button.dataset.filter;
+        $$('#results-filter [data-filter]').forEach((item) => {
+          const active = item.dataset.filter === App.reviewFilter;
+          item.classList.toggle('is-active', active);
+          item.setAttribute('aria-pressed', active ? 'true' : 'false');
+        });
+        renderResultsList(App.reviewFilter);
+      });
+    }
 
     $('#restart-btn').addEventListener('click', () => {
       if (!App.lastConfig) return;
@@ -1212,24 +1529,56 @@
     });
 
     $('#save-settings-btn').addEventListener('click', () => {
+      const mode = $('#ai-mode').value;
       const endpoint = $('#ai-endpoint').value.trim();
       const enabled = $('#ai-enabled').checked;
-      if (enabled && !endpoint) {
-        setStatus('#ai-status', 'Renseigne un point d’API avant d’activer l’IA.', 'error');
+      const model = $('#ai-model') ? $('#ai-model').value : '';
+      const quizCount = Math.max(1, Math.min(50, Number($('#quiz-count').value) || 10));
+      const dailyGoal = Math.max(0, Math.min(200, Number($('#daily-goal').value) || 0));
+
+      if (enabled && mode === 'proxy' && !endpoint) {
+        setAiStatus('Renseigne un point d’API avant d’activer le proxy.', 'error');
         return;
       }
-      if (enabled && !/^https?:\/\//i.test(endpoint)) {
-        setStatus('#ai-status', 'Le point d’API doit commencer par http:// ou https://.', 'error');
+      if (enabled && mode === 'proxy' && !/^https?:\/\//i.test(endpoint)) {
+        setAiStatus('Le point d’API doit commencer par http:// ou https://.', 'error');
         return;
       }
-      App.progress.updateSettings({ aiEndpoint: endpoint, aiEnabled: enabled });
-      setStatus('#ai-status', 'Réglages enregistrés.', 'ok');
+      if (enabled && mode === 'opencode' && location.protocol === 'file:') {
+        setAiStatus('Le mode opencode nécessite le serveur local : ouvre l’application via http://localhost:8787.', 'error');
+        return;
+      }
+
+      App.progress.updateSettings({
+        aiMode: mode,
+        aiEndpoint: endpoint,
+        aiModel: model,
+        aiEnabled: enabled,
+        quizCount,
+        dailyGoal
+      });
+      syncAiFields();
+      renderGoal();
+      if (mode === 'opencode') {
+        loadAiStatus();
+      } else {
+        setAiStatus('Réglages enregistrés.', 'ok');
+      }
       showToast('Réglages enregistrés.', 'success');
     });
+
+    $('#ai-mode').addEventListener('change', () => {
+      syncAiFields();
+      if ($('#ai-mode').value === 'opencode') loadAiStatus();
+    });
+
+    $('#theme-toggle').addEventListener('click', cycleTheme);
 
     $('#test-ai-btn').addEventListener('click', testAiConnection);
 
     $('#export-btn').addEventListener('click', exportProgress);
+    $('#export-csv-btn').addEventListener('click', () => exportQuestions('csv'));
+    $('#export-anki-btn').addEventListener('click', () => exportQuestions('anki'));
     $('#import-backup-btn').addEventListener('click', () => $('#backup-input').click());
     $('#backup-input').addEventListener('change', (event) => {
       const file = event.target.files && event.target.files[0];
@@ -1272,36 +1621,39 @@
     const target = event.target;
     if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
 
-    if (!App.answered && /^[1-4]$/.test(event.key)) {
+    if (/^[1-4]$/.test(event.key)) {
       event.preventDefault();
       selectOption(Number(event.key) - 1);
       return;
     }
-    if (!App.answered && /^[a-dA-D]$/.test(event.key)) {
+    if (/^[a-dA-D]$/.test(event.key)) {
       event.preventDefault();
       selectOption(event.key.toLowerCase().charCodeAt(0) - 97);
       return;
     }
     if (event.key === 'Enter') {
-      if (App.answered) {
-        event.preventDefault();
-        nextQuestion();
-      } else if (App.selected !== null) {
-        event.preventDefault();
-        validateAnswer();
-      }
+      event.preventDefault();
+      nextQuestion();
     }
   }
 
   async function testAiConnection() {
-    const endpoint = $('#ai-endpoint').value.trim();
-    const status = $('#ai-status');
-    if (!endpoint) {
-      setStatus('#ai-status', 'Renseigne d’abord le point d’API.', 'error');
+    const mode = $('#ai-mode') ? $('#ai-mode').value : 'local';
+    if (mode === 'opencode') {
+      await loadAiStatus();
       return;
     }
-    status.className = 'hint';
-    status.textContent = 'Test de connexion…';
+    if (mode === 'local') {
+      setAiStatus('Mode local : aucune connexion nécessaire, tout fonctionne hors ligne.', 'ok');
+      return;
+    }
+
+    const endpoint = $('#ai-endpoint').value.trim();
+    if (!endpoint) {
+      setAiStatus('Renseigne d’abord le point d’API.', 'error');
+      return;
+    }
+    setAiStatus('Test de connexion…', '');
     try {
       const response = await fetch(endpoint, {
         method: 'POST',
@@ -1310,15 +1662,12 @@
       });
       // Un proxy joignable répond 400/422 à un texte vide : c'est suffisant.
       if (response.status < 500) {
-        status.className = 'hint is-ok';
-        status.textContent = 'Proxy joignable (HTTP ' + response.status + '). Le mode IA peut être activé.';
+        setAiStatus('Proxy joignable (HTTP ' + response.status + '). Le mode IA peut être activé.', 'ok');
       } else {
-        status.className = 'hint is-error';
-        status.textContent = 'Le proxy répond avec une erreur ' + response.status + '. Vérifie la clé API côté serveur.';
+        setAiStatus('Le proxy répond avec une erreur ' + response.status + '. Vérifie la clé API côté serveur.', 'error');
       }
     } catch (error) {
-      status.className = 'hint is-error';
-      status.textContent = 'Connexion impossible : ' + (error.message || 'réseau indisponible') + '.';
+      setAiStatus('Connexion impossible : ' + (error.message || 'réseau indisponible') + '.', 'error');
     }
   }
 

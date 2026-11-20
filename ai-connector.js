@@ -38,7 +38,13 @@
       if (!raw || typeof raw !== 'object') continue;
       const text = String(raw.q || raw.question || '').trim();
       const options = (raw.options || raw.o || []).map((opt) => String(opt).trim());
-      const answer = normalizeAnswer(raw.answer !== undefined ? raw.answer : raw.a, options.length);
+      const rawAnswers = Array.isArray(raw.answers) ? raw.answers : null;
+      const answers = rawAnswers
+        ? Array.from(new Set(rawAnswers.map((value) => normalizeAnswer(value, options.length)).filter((value) => value >= 0))).sort((a, b) => a - b)
+        : [];
+      const answer = answers.length
+        ? answers[0]
+        : normalizeAnswer(raw.answer !== undefined ? raw.answer : raw.a, options.length);
       const explanation = String(raw.explanation || raw.e || '').trim();
       if (!text || options.length !== 4 || answer < 0 || !explanation) continue;
       if (new Set(options.map((opt) => opt.toLowerCase())).size !== 4) continue;
@@ -46,6 +52,7 @@
         text,
         options,
         answer,
+        answers: answers.length > 1 ? answers : undefined,
         explanation,
         source: String(raw.source || sourceLabel || 'Généré par IA'),
         kind: 'ai',
@@ -61,7 +68,7 @@
     if (typeof fetch !== 'function') throw new Error('fetch indisponible dans ce navigateur.');
 
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    const timeout = setTimeout(() => controller && controller.abort(), options.timeout || 60000);
+    const timeout = setTimeout(() => controller && controller.abort(), options.timeout || 180000);
 
     try {
       const response = await fetch(endpoint, {

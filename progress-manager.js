@@ -44,7 +44,15 @@
       quizzes: [],
       recent: [],
       counters: { answered: 0, correct: 0, wrong: 0, currentStreak: 0, bestStreak: 0 },
-      settings: { aiEndpoint: '', aiEnabled: false }
+      settings: {
+        aiEndpoint: '',
+        aiEnabled: false,
+        aiMode: 'local',
+        aiModel: '',
+        quizCount: 10,
+        dailyGoal: 20,
+        theme: 'dark'
+      }
     };
   }
 
@@ -366,6 +374,51 @@
       this.state.settings = { ...this.state.settings, ...(patch || {}) };
       this.persist();
       return this.state.settings;
+    }
+
+    /* ---------------------------- Activité ------------------------------ */
+
+    /** Réponses et quiz terminés depuis le début de la journée. */
+    getDailyProgress(now = Date.now()) {
+      const start = new Date(now);
+      start.setHours(0, 0, 0, 0);
+      const startMs = start.getTime();
+      let answered = 0;
+      let correct = 0;
+      let quizzes = 0;
+      for (const quiz of this.state.quizzes) {
+        if ((quiz.date || 0) < startMs) continue;
+        answered += quiz.total || 0;
+        correct += quiz.score || 0;
+        quizzes++;
+      }
+      return {
+        answered,
+        correct,
+        quizzes,
+        accuracy: answered > 0 ? Math.round((correct / answered) * 100) : 0
+      };
+    }
+
+    /** Activité des 7 derniers jours (aujourd'hui inclus). */
+    getWeekActivity(now = Date.now()) {
+      const startOfToday = new Date(now);
+      startOfToday.setHours(0, 0, 0, 0);
+      const days = [];
+      for (let offset = 6; offset >= 0; offset--) {
+        const start = startOfToday.getTime() - offset * DAY;
+        const end = start + DAY;
+        let answered = 0;
+        let correct = 0;
+        for (const quiz of this.state.quizzes) {
+          const date = quiz.date || 0;
+          if (date < start || date >= end) continue;
+          answered += quiz.total || 0;
+          correct += quiz.score || 0;
+        }
+        days.push({ date: start, answered, correct });
+      }
+      return days;
     }
 
     /* ---------------------------- Import/Export ------------------------- */

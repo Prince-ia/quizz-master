@@ -7,6 +7,9 @@
   <meta name="theme-color" content="#0b1020">
   <title>Quiz Master — Coach de révision</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='24' fill='%23ff4d5e'/%3E%3Cpath d='M42 20h16v22h22v16H58v22H42V58H20V42h22z' fill='white'/%3E%3C/svg%3E">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Quiz Master">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -35,6 +38,7 @@
 
       <div class="topbar-actions">
         <span class="storage-pill" id="storage-pill" title="Sauvegarde locale de la progression">Local</span>
+        <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Changer de thème" title="Thème : sombre">◐</button>
         <button type="button" class="btn btn-primary btn-sm" id="top-import-btn">
           <span aria-hidden="true">＋</span> Importer
         </button>
@@ -104,6 +108,19 @@
             <span class="stat-icon icon-violet" aria-hidden="true">↻</span>
             <div><strong id="stat-due">0</strong><span>À réviser aujourd'hui</span></div>
           </article>
+        </div>
+
+        <div class="goal-card" id="goal-card">
+          <div class="goal-copy">
+            <strong>Objectif du jour</strong>
+            <span id="goal-text">Aucun objectif défini — règle-le dans les réglages.</span>
+          </div>
+          <div class="goal-progress">
+            <div class="progress progress-sm" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="goal-progress">
+              <div class="progress-bar" id="goal-bar" style="width:0%"></div>
+            </div>
+          </div>
+          <span class="goal-value" id="goal-value">0 / 0</span>
         </div>
 
         <div class="section-head">
@@ -178,7 +195,7 @@
             <h1 id="quiz-title">Question <span id="quiz-counter">1 / 10</span></h1>
           </div>
           <div class="quiz-head-actions">
-            <span class="quiz-score" id="quiz-score" aria-live="polite">0 bonne réponse</span>
+            <span class="quiz-score" id="quiz-score" aria-live="polite">Une seule réponse</span>
             <button type="button" class="btn btn-ghost btn-sm" id="quit-quiz">Quitter</button>
           </div>
         </div>
@@ -193,13 +210,11 @@
             <span class="question-type" id="question-type">Question</span>
             <span class="question-source" id="question-source"></span>
           </div>
-          <h2 class="question-text" id="question-text">Chargement…</h2>
+          <h2 class="question-text" id="question-text" tabindex="-1">Chargement…</h2>
           <div class="options" id="options" role="group" aria-label="Propositions de réponse"></div>
-          <div class="feedback" id="feedback" hidden></div>
           <div class="question-actions">
-            <span class="keyboard-hint" id="keyboard-hint">Astuce : touches 1-4 puis Entrée</span>
-            <button type="button" class="btn btn-primary" id="validate-btn" disabled>Valider ma réponse</button>
-            <button type="button" class="btn btn-primary" id="next-btn" hidden>Question suivante</button>
+            <span class="keyboard-hint" id="keyboard-hint">Sélectionne une ou plusieurs réponses, puis clique sur Suivant</span>
+            <button type="button" class="btn btn-primary" id="next-btn">Suivant</button>
           </div>
         </article>
       </section>
@@ -215,7 +230,7 @@
           </div>
           <div class="results-copy">
             <p class="eyebrow" id="results-eyebrow">Résultats</p>
-            <h1 id="results-title">Résultat du quiz</h1>
+            <h1 id="results-title" tabindex="-1">Résultat du quiz</h1>
             <p class="results-message" id="results-message">…</p>
             <div class="results-actions">
               <button type="button" class="btn btn-primary" id="restart-btn">↻ Recommencer un quiz</button>
@@ -227,12 +242,21 @@
 
         <div class="results-kpis" id="results-kpis"></div>
 
-        <div class="section-head">
-          <h2>Questions à revoir</h2>
-          <span class="badge badge-soft" id="missed-count">0</span>
+        <div class="section-head review-head-row">
+          <div>
+            <h2>Détail des réponses</h2>
+            <p class="page-sub" id="results-summary">Toutes les questions, tes choix et les bonnes réponses.</p>
+          </div>
+          <div class="review-toolbar">
+            <span class="badge badge-soft" id="results-count">0 question</span>
+            <div class="segmented" id="results-filter" role="group" aria-label="Filtrer les réponses">
+              <button type="button" data-filter="all" class="is-active" aria-pressed="true">Tout</button>
+              <button type="button" data-filter="wrong" aria-pressed="false">Erreurs <span id="results-wrong-count">0</span></button>
+            </div>
+          </div>
         </div>
-        <div class="missed-list" id="missed-list"></div>
-        <p class="empty-note" id="missed-empty" hidden>🎉 Aucune erreur : toutes les réponses étaient justes.</p>
+        <div class="review-list" id="results-list"></div>
+        <p class="empty-note" id="results-empty" hidden></p>
       </section>
 
       <!-- =========================== PROGRESSION ========================= -->
@@ -247,6 +271,14 @@
         </div>
 
         <div class="stat-grid" id="dashboard-stats"></div>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Activité des 7 derniers jours</h2>
+            <span class="badge badge-soft" id="week-total">0 réponse</span>
+          </div>
+          <div class="week-chart" id="week-chart" role="img" aria-label="Activité des sept derniers jours"></div>
+        </section>
 
         <div class="dash-columns">
           <section class="panel">
@@ -298,23 +330,62 @@
             <h2>Génération des questions</h2>
             <p class="panel-text">
               Par défaut, les questions sont générées localement à partir du texte du cours,
-              sans réseau. Tu peux brancher un proxy IA pour enrichir la banque.
+              sans réseau. Tu peux utiliser <strong>opencode</strong> installé sur cet ordinateur,
+              ou un proxy IA compatible OpenAI.
             </p>
             <label class="field">
-              <span>Point d'API du proxy IA</span>
-              <input type="url" id="ai-endpoint" placeholder="http://localhost:8787/api/generate" autocomplete="off">
-              <small>Aucune clé API n'est stockée dans le navigateur : elle reste sur ton serveur.</small>
+              <span>Moteur de génération</span>
+              <select id="ai-mode">
+                <option value="local">Local uniquement (hors ligne)</option>
+                <option value="opencode">opencode local (sans clé API)</option>
+                <option value="proxy">Proxy IA personnalisé</option>
+              </select>
             </label>
+            <div id="ai-proxy-fields">
+              <label class="field">
+                <span>Point d'API du proxy IA</span>
+                <input type="url" id="ai-endpoint" placeholder="http://localhost:8787/api/generate" autocomplete="off">
+                <small>Aucune clé API n'est stockée dans le navigateur : elle reste sur ton serveur.</small>
+              </label>
+            </div>
+            <div id="ai-opencode-fields" hidden>
+              <div class="field-row">
+                <label class="field">
+                  <span>Modèle opencode</span>
+                  <select id="ai-model"></select>
+                </label>
+              </div>
+              <p class="hint">
+                Le serveur local doit tourner (<code>node server/server.js</code>) et opencode doit être installé.
+                Aucune clé n'est nécessaire avec les modèles gratuits.
+              </p>
+            </div>
             <label class="switch">
               <input type="checkbox" id="ai-enabled">
               <span class="switch-track" aria-hidden="true"></span>
               <span>Utiliser l'IA à l'import des documents</span>
             </label>
+            <div class="field-row">
+              <label class="field">
+                <span>Questions par quiz</span>
+                <select id="quiz-count">
+                  <option value="5">5 questions</option>
+                  <option value="10">10 questions</option>
+                  <option value="15">15 questions</option>
+                  <option value="20">20 questions</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Objectif quotidien</span>
+                <input type="number" id="daily-goal" min="0" max="200" step="5" inputmode="numeric">
+                <small>Nombre de réponses visé par jour (0 = désactivé).</small>
+              </label>
+            </div>
             <div class="inline-actions">
               <button type="button" class="btn btn-primary" id="save-settings-btn">Enregistrer</button>
               <button type="button" class="btn btn-ghost" id="test-ai-btn">Tester la connexion</button>
             </div>
-            <p class="hint" id="ai-status"></p>
+            <div class="ai-status-box" id="ai-status" role="status" aria-live="polite"></div>
           </section>
 
           <section class="panel">
@@ -331,6 +402,8 @@
               <button type="button" class="btn btn-soft" id="export-btn">⇩ Exporter ma progression</button>
               <button type="button" class="btn btn-ghost" id="import-backup-btn">⇧ Importer une sauvegarde</button>
               <input type="file" id="backup-input" accept=".json" hidden>
+              <button type="button" class="btn btn-ghost" id="export-csv-btn">⇩ Questions (CSV)</button>
+              <button type="button" class="btn btn-ghost" id="export-anki-btn">⇩ Questions (Anki)</button>
               <button type="button" class="btn btn-danger" id="reset-stats-btn">Réinitialiser les statistiques</button>
               <button type="button" class="btn btn-danger" id="reset-all-btn">Tout effacer</button>
             </div>
