@@ -850,7 +850,7 @@
    */
   function generate(text, options = {}) {
     const documentId = options.documentId || ('doc_' + hashString(text.slice(0, 4000)));
-    const maxPerChapter = options.maxPerChapter || 26;
+    const maxPerChapter = options.maxPerChapter || 40;
     const chapters = splitChapters(text);
 
     if (chapters.length === 0) {
@@ -898,10 +898,10 @@
 
     for (const item of perChapter) {
       totalSentences += item.sentences.length;
-      const defs = buildDefinitionQuestions(item.definitions, item.chapter, allDefinitions, 12);
-      const nums = buildNumberQuestions(item.numbers, allNumbers, item.chapter, { range: 5, year: 4, quantity: 4 });
-      const sigles = buildAcronymQuestions(item.acronyms, allAcronyms, item.chapter, 4);
-      const lists = buildListQuestions(item.lists, allLists, item.chapter, 6);
+      const defs = buildDefinitionQuestions(item.definitions, item.chapter, allDefinitions, 16);
+      const nums = buildNumberQuestions(item.numbers, allNumbers, item.chapter, { range: 6, year: 5, quantity: 5 });
+      const sigles = buildAcronymQuestions(item.acronyms, allAcronyms, item.chapter, 6);
+      const lists = buildListQuestions(item.lists, allLists, item.chapter, 8);
 
       let questions = [...defs, ...nums, ...sigles, ...lists];
       // Mélange déterministe pour éviter de toujours garder les mêmes types.
