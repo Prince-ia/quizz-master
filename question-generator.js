@@ -112,6 +112,20 @@
     return true;
   }
 
+  /**
+   * Intrus crédible pour une question d'exclusion : un élément court et
+   * nominal. Une phrase entière (« Son action se décompose en trois gestes »)
+   * rendrait la bonne réponse évidente.
+   */
+  function isPlausibleIntruder(value) {
+    const text = cleanInline(value);
+    if (text.length < 3 || text.length > 70) return false;
+    if (/[.!?]$/.test(text)) return false;
+    if (text.split(/\s+/).length > 8) return false;
+    if (/^(?:selon|dans|après|avant|lorsque|quand|si|il|elle|on|nous|vous)\b/i.test(text)) return false;
+    return true;
+  }
+
   /** Élément formulé comme un objectif pédagogique (« De savoir pratiquer… »). */
   function isObjectiveItem(value) {
     const text = cleanInline(value)
