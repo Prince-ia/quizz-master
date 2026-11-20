@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Quiz Master — transformez vos cours DOCX en quiz intelligents, avec suivi de progression et répétition espacée.">
+  <meta name="theme-color" content="#0b1020">
+  <title>Quiz Master — Coach de révision</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='24' fill='%23ff4d5e'/%3E%3Cpath d='M42 20h16v22h22v16H58v22H42V58H20V42h22z' fill='white'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Aller au contenu</a>
+
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="#accueil" data-nav="home" aria-label="Quiz Master, accueil">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 32 32" width="22" height="22" fill="none">
+            <path d="M12 3h8v9h9v8h-9v9h-8v-9H3v-8h9z" fill="currentColor"/>
+          </svg>
+        </span>
+        <span class="brand-text">
+          <strong>Quiz Master</strong>
+          <small>Coach de révision</small>
+        </span>
+      </a>
+
+      <nav class="topnav" aria-label="Navigation principale">
+        <button type="button" class="nav-link" data-nav="home">Accueil</button>
+        <button type="button" class="nav-link" data-nav="library">Mes cours</button>
+        <button type="button" class="nav-link" data-nav="dashboard">Progression</button>
+        <button type="button" class="nav-link" data-nav="settings">Réglages</button>
+      </nav>
+
+      <div class="topbar-actions">
+        <span class="storage-pill" id="storage-pill" title="Sauvegarde locale de la progression">Local</span>
+        <button type="button" class="btn btn-primary btn-sm" id="top-import-btn">
+          <span aria-hidden="true">＋</span> Importer
+        </button>
+      </div>
+    </header>
+
+    <main id="main">
+      <!-- ============================ ACCUEIL ============================ -->
+      <section class="view" id="view-home" aria-labelledby="home-title">
+        <div class="hero">
+          <div class="hero-glow" aria-hidden="true"></div>
+          <div class="hero-content">
+            <p class="eyebrow"><span class="pulse-dot" aria-hidden="true"></span> Apprentissage actif &amp; répétition espacée</p>
+            <h1 id="home-title">Transforme tes cours en <span class="grad-text">quiz intelligents</span></h1>
+            <p class="hero-text">
+              Importe un document Word, révise par chapitre et laisse Quiz Master cibler
+              les notions que tu maîtrises le moins. Des questions issues de ton cours,
+              rien d'inventé.
+            </p>
+            <div class="hero-actions">
+              <button type="button" class="btn btn-primary btn-lg" id="hero-start">
+                <span aria-hidden="true">▶</span> Commencer une révision
+              </button>
+              <button type="button" class="btn btn-ghost btn-lg" id="hero-import">
+                <span aria-hidden="true">⇪</span> Importer un cours
+              </button>
+            </div>
+            <p class="hero-hint" id="hero-hint">Cours de secourisme CRT 2024 déjà disponible.</p>
+          </div>
+
+          <aside class="hero-panel" aria-label="Aperçu de progression">
+            <div class="hero-panel-head">
+              <span>Ta progression</span>
+              <span class="badge badge-soft" id="hero-level">Débutant</span>
+            </div>
+            <div class="ring-wrap">
+              <div class="ring" id="hero-ring" style="--value:0">
+                <div class="ring-inner">
+                  <strong id="hero-accuracy">0%</strong>
+                  <small>réussite</small>
+                </div>
+              </div>
+            </div>
+            <dl class="hero-kpis">
+              <div><dt>Quiz terminés</dt><dd id="hero-quizzes">0</dd></div>
+              <div><dt>Questions répondues</dt><dd id="hero-answered">0</dd></div>
+              <div><dt>Meilleure série</dt><dd id="hero-streak">0</dd></div>
+            </dl>
+            <button type="button" class="btn btn-soft btn-block" data-nav="dashboard">Voir mon tableau de bord</button>
+          </aside>
+        </div>
+
+        <div class="stat-grid" id="home-stats" aria-label="Statistiques rapides">
+          <article class="stat-card">
+            <span class="stat-icon icon-red" aria-hidden="true">◎</span>
+            <div><strong id="stat-quizzes">0</strong><span>Quiz effectués</span></div>
+          </article>
+          <article class="stat-card">
+            <span class="stat-icon icon-teal" aria-hidden="true">✓</span>
+            <div><strong id="stat-accuracy">0%</strong><span>Taux de réussite</span></div>
+          </article>
+          <article class="stat-card">
+            <span class="stat-icon icon-gold" aria-hidden="true">✦</span>
+            <div><strong id="stat-seen">0</strong><span>Questions travaillées</span></div>
+          </article>
+          <article class="stat-card">
+            <span class="stat-icon icon-violet" aria-hidden="true">↻</span>
+            <div><strong id="stat-due">0</strong><span>À réviser aujourd'hui</span></div>
+          </article>
+        </div>
+
+        <div class="section-head">
+          <h2>Continuer là où tu t'es arrêté</h2>
+          <button type="button" class="link-btn" data-nav="library">Tous mes cours →</button>
+        </div>
+        <div id="home-continue" class="continue-grid"></div>
+
+        <div class="feature-grid">
+          <article class="feature-card">
+            <span class="feature-icon" aria-hidden="true">🎲</span>
+            <h3>Sessions toujours différentes</h3>
+            <p>Questions et propositions mélangées, questions inédites privilégiées : impossible d'apprendre par cœur l'ordre du quiz.</p>
+          </article>
+          <article class="feature-card">
+            <span class="feature-icon" aria-hidden="true">🧠</span>
+            <h3>Répétition espacée</h3>
+            <p>Une notion ratée revient plus vite. Une notion maîtrisée s'espace. Ton temps de révision se concentre là où il compte.</p>
+          </article>
+          <article class="feature-card">
+            <span class="feature-icon" aria-hidden="true">📊</span>
+            <h3>Diagnostic précis</h3>
+            <p>Maîtrise par chapitre, questions difficiles, historique des quiz : tu sais exactement quoi retravailler.</p>
+          </article>
+        </div>
+      </section>
+
+      <!-- ============================ MES COURS ========================== -->
+      <section class="view" id="view-library" aria-labelledby="library-title" hidden>
+        <div class="page-head">
+          <div>
+            <p class="eyebrow">Bibliothèque</p>
+            <h1 id="library-title">Mes cours</h1>
+            <p class="page-sub">Importe un DOCX, choisis un chapitre et lance une partie de 10 questions.</p>
+          </div>
+          <button type="button" class="btn btn-primary" id="library-import-btn">
+            <span aria-hidden="true">⇪</span> Importer un DOCX
+          </button>
+        </div>
+
+        <div class="dropzone" id="dropzone" tabindex="0" role="button"
+             aria-label="Importer un fichier DOCX par glisser-déposer ou en cliquant">
+          <input type="file" id="file-input" accept=".docx,.txt,.md" multiple hidden>
+          <div class="dropzone-icon" aria-hidden="true">⇪</div>
+          <div>
+            <strong>Glisse ton fichier ici</strong>
+            <span>ou clique pour parcourir — .docx, .txt ou .md (le texte est extrait localement)</span>
+          </div>
+          <div class="dropzone-status" id="dropzone-status" aria-live="polite"></div>
+        </div>
+
+        <div class="library-toolbar">
+          <label class="field-inline">
+            <span>Cours actif</span>
+            <select id="doc-select" aria-label="Choisir un cours"></select>
+          </label>
+          <div class="toolbar-actions">
+            <button type="button" class="btn btn-soft" id="quiz-all-btn">Quiz — toutes les parties</button>
+            <button type="button" class="btn btn-ghost" id="delete-doc-btn" title="Supprimer le cours importé">Supprimer</button>
+          </div>
+        </div>
+
+        <div class="doc-meta" id="doc-meta"></div>
+        <div class="chapter-grid" id="chapter-grid"></div>
+      </section>
+
+      <!-- ============================== QUIZ ============================= -->
+      <section class="view" id="view-quiz" aria-labelledby="quiz-title" hidden>
+        <div class="quiz-head">
+          <div class="quiz-heading">
+            <p class="eyebrow" id="quiz-chapter">Chapitre</p>
+            <h1 id="quiz-title">Question <span id="quiz-counter">1 / 10</span></h1>
+          </div>
+          <div class="quiz-head-actions">
+            <span class="quiz-score" id="quiz-score" aria-live="polite">0 bonne réponse</span>
+            <button type="button" class="btn btn-ghost btn-sm" id="quit-quiz">Quitter</button>
+          </div>
+        </div>
+
+        <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="10" aria-valuenow="0"
+             aria-label="Progression du quiz" id="quiz-progress">
+          <div class="progress-bar" id="quiz-progress-bar"></div>
+        </div>
+
+        <article class="question-card" id="question-card" aria-live="polite">
+          <div class="question-top">
+            <span class="question-type" id="question-type">Question</span>
+            <span class="question-source" id="question-source"></span>
+          </div>
+          <h2 class="question-text" id="question-text">Chargement…</h2>
+          <div class="options" id="options" role="group" aria-label="Propositions de réponse"></div>
+          <div class="feedback" id="feedback" hidden></div>
+          <div class="question-actions">
+            <span class="keyboard-hint" id="keyboard-hint">Astuce : touches 1-4 puis Entrée</span>
+            <button type="button" class="btn btn-primary" id="validate-btn" disabled>Valider ma réponse</button>
+            <button type="button" class="btn btn-primary" id="next-btn" hidden>Question suivante</button>
+          </div>
+        </article>
+      </section>
+
+      <!-- ============================ RÉSULTATS ========================== -->
+      <section class="view" id="view-results" aria-labelledby="results-title" hidden>
+        <div class="results-hero">
+          <div class="score-ring" id="score-ring" style="--value:0">
+            <div class="score-ring-inner">
+              <strong id="results-score">0/10</strong>
+              <small id="results-percent">0%</small>
+            </div>
+          </div>
+          <div class="results-copy">
+            <p class="eyebrow" id="results-eyebrow">Résultats</p>
+            <h1 id="results-title">Résultat du quiz</h1>
+            <p class="results-message" id="results-message">…</p>
+            <div class="results-actions">
+              <button type="button" class="btn btn-primary" id="restart-btn">↻ Recommencer un quiz</button>
+              <button type="button" class="btn btn-soft" id="review-errors-btn">🎯 Réviser mes erreurs</button>
+              <button type="button" class="btn btn-ghost" data-nav="library">Retour aux cours</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="results-kpis" id="results-kpis"></div>
+
+        <div class="section-head">
+          <h2>Questions à revoir</h2>
+          <span class="badge badge-soft" id="missed-count">0</span>
+        </div>
+        <div class="missed-list" id="missed-list"></div>
+        <p class="empty-note" id="missed-empty" hidden>🎉 Aucune erreur : toutes les réponses étaient justes.</p>
+      </section>
+
+      <!-- =========================== PROGRESSION ========================= -->
+      <section class="view" id="view-dashboard" aria-labelledby="dashboard-title" hidden>
+        <div class="page-head">
+          <div>
+            <p class="eyebrow">Tableau de bord</p>
+            <h1 id="dashboard-title">Ma progression</h1>
+            <p class="page-sub">Vue d'ensemble de ton apprentissage, conservée sur cet appareil.</p>
+          </div>
+          <button type="button" class="btn btn-soft" id="dash-review-errors">🎯 Réviser mes erreurs</button>
+        </div>
+
+        <div class="stat-grid" id="dashboard-stats"></div>
+
+        <div class="dash-columns">
+          <section class="panel">
+            <div class="panel-head">
+              <h2>Maîtrise par chapitre</h2>
+              <span class="badge badge-soft" id="dash-doc-name">Cours</span>
+            </div>
+            <div id="mastery-list" class="mastery-list"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <h2>Notions difficiles</h2>
+              <span class="badge badge-warn" id="difficult-count">0</span>
+            </div>
+            <div id="difficult-list" class="difficult-list"></div>
+          </section>
+        </div>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Historique des quiz</h2>
+            <span class="badge badge-soft" id="history-count">0</span>
+          </div>
+          <div class="history-table-wrap">
+            <table class="history-table">
+              <thead>
+                <tr><th>Date</th><th>Cours / partie</th><th>Score</th><th>Réussite</th></tr>
+              </thead>
+              <tbody id="history-body"></tbody>
+            </table>
+          </div>
+          <p class="empty-note" id="history-empty" hidden>Termine ton premier quiz pour voir ton historique ici.</p>
+        </section>
+      </section>
+
+      <!-- ============================= RÉGLAGES ========================== -->
+      <section class="view" id="view-settings" aria-labelledby="settings-title" hidden>
+        <div class="page-head">
+          <div>
+            <p class="eyebrow">Réglages</p>
+            <h1 id="settings-title">Configuration</h1>
+            <p class="page-sub">Génération des questions, sauvegarde et données personnelles.</p>
+          </div>
+        </div>
+
+        <div class="settings-grid">
+          <section class="panel">
+            <h2>Génération des questions</h2>
+            <p class="panel-text">
+              Par défaut, les questions sont générées localement à partir du texte du cours,
+              sans réseau. Tu peux brancher un proxy IA pour enrichir la banque.
+            </p>
+            <label class="field">
+              <span>Point d'API du proxy IA</span>
+              <input type="url" id="ai-endpoint" placeholder="http://localhost:8787/api/generate" autocomplete="off">
+              <small>Aucune clé API n'est stockée dans le navigateur : elle reste sur ton serveur.</small>
+            </label>
+            <label class="switch">
+              <input type="checkbox" id="ai-enabled">
+              <span class="switch-track" aria-hidden="true"></span>
+              <span>Utiliser l'IA à l'import des documents</span>
+            </label>
+            <div class="inline-actions">
+              <button type="button" class="btn btn-primary" id="save-settings-btn">Enregistrer</button>
+              <button type="button" class="btn btn-ghost" id="test-ai-btn">Tester la connexion</button>
+            </div>
+            <p class="hint" id="ai-status"></p>
+          </section>
+
+          <section class="panel">
+            <h2>Mes données</h2>
+            <p class="panel-text">
+              Toute la progression est conservée dans le <code>localStorage</code> de ce navigateur.
+              Exporte régulièrement une sauvegarde si tu changes d'appareil.
+            </p>
+            <div class="storage-meter">
+              <div class="storage-meter-head"><span>Espace utilisé</span><strong id="storage-usage">—</strong></div>
+              <div class="progress progress-sm"><div class="progress-bar" id="storage-bar" style="width:0%"></div></div>
+            </div>
+            <div class="inline-actions wrap">
+              <button type="button" class="btn btn-soft" id="export-btn">⇩ Exporter ma progression</button>
+              <button type="button" class="btn btn-ghost" id="import-backup-btn">⇧ Importer une sauvegarde</button>
+              <input type="file" id="backup-input" accept=".json" hidden>
+              <button type="button" class="btn btn-danger" id="reset-stats-btn">Réinitialiser les statistiques</button>
+              <button type="button" class="btn btn-danger" id="reset-all-btn">Tout effacer</button>
+            </div>
+            <p class="hint" id="data-status"></p>
+          </section>
+
+          <section class="panel">
+            <h2>À propos</h2>
+            <p class="panel-text">
+              <strong>Quiz Master</strong> transforme tes cours DOCX en quiz de 10 questions,
+              avec correction expliquée, randomisation intelligente et répétition espacée.
+            </p>
+            <ul class="about-list">
+              <li>📄 Extraction locale des fichiers Word (.docx)</li>
+              <li>🧩 Banque de questions issue uniquement du cours</li>
+              <li>🔁 Historique et statistiques conservés hors ligne</li>
+              <li>🔒 Aucune donnée envoyée sans proxy configuré</li>
+            </ul>
+            <p class="hint">Version 1.0 — projet éducatif local.</p>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <span>Quiz Master · Révision intelligente</span>
+      <span>Données stockées localement sur ton appareil.</span>
+    </footer>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+  <script src="data/preset-course.js"></script>
+  <script src="docx-reader.js"></script>
+  <script src="question-generator.js"></script>
+  <script src="quiz-engine.js"></script>
+  <script src="progress-manager.js"></script>
+  <script src="ai-connector.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

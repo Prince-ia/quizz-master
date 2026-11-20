@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <title>Quiz Master — test d'intégration headless</title>
+  <style>
+    body { font-family: Consolas, monospace; background: #0b1020; color: #d8e0f0; margin: 0; padding: 16px; }
+    #out { white-space: pre-wrap; font-size: 13px; margin-bottom: 12px; }
+    iframe { width: 1180px; height: 760px; border: 1px solid #333; background: #000; }
+  </style>
+</head>
+<body>
+  <pre id="out">RUNNING</pre>
+  <iframe id="frame" src="/index.html" title="Application Quiz Master"></iframe>
+
+  <script>
+    (function () {
+      'use strict';
+      const out = document.getElementById('out');
+      const frame = document.getElementById('frame');
+      const logs = [];
+      let failed = 0;
+
+      function ok(name) { logs.push('PASS — ' + name); }
+      function fail(name, error) { failed++; logs.push('FAIL — ' + name + ' :: ' + (error && error.message ? error.message : error)); }
+      function assert(condition, message) { if (!condition) throw new Error(message || 'assertion échouée'); }
+      function waitFor(predicate, timeout) {
+        return new Promise(function (resolve, reject) {
+          const start = Date.now();
+          const timer = setInterval(function () {
+            let ready = false;
+            try { ready = predicate(); } catch (error) { ready = false; }
+            if (ready) {
+              clearInterval(timer);
+              resolve();
+            } else if (Date.now() - start > (timeout || 8000)) {
+              clearInterval(timer);
+              reject(new Error('délai dépassé'));
+            }
+          }, 40);
+        });
+      }
+      function finish() {
+        logs.push('');
+        logs.push(failed ? 'TESTS FAILED (' + failed + ')' : 'ALL TESTS PASSED');
+        out.textContent = logs.join('\n');
+      }
+
+      async function loadDocx(win) {
+        const response = await fetch('/CRT%202024.docx');
+        assert(response.ok, 'téléchargement du DOCX impossible');
+        const blob = await response.blob();
+        const file = new File([blob], 'CRT 2024.docx', { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+        return win.DocxReader.readFile(file, { mammoth: win.mammoth });
+      }
+
+      async function run() {
+        const win = frame.contentWindow;
+        const doc = frame.contentDocument;
+        const app = win.QuizMasterApp;
+        assert(app, 'QuizMasterApp non exposé');
+        assert(app.state.progress, 'gestionnaire de progression non initialisé');
+
+        // 1. Accueil
+        assert(doc.querySelector('#view-home').hidden === false, 'la vue Accueil devrait être visible');
+        assert(doc.querySelector('#hero-accuracy').textContent.trim().length > 0, 'statistiques d’accueil non rendues');
+        assert(doc.querySelectorAll('#home-continue .continue-card').length > 0, 'cartes de reprise non rendues');
+        const presetDoc = app.state.progress.listDocuments().find((d) => d.id === 'crt-2024');
+        assert(presetDoc, 'cours préchargé absent');
+        assert(presetDoc.questionCount >= 100, 'banque préchargée trop petite');
+        ok('accueil rendu avec la banque préchargée (' + presetDoc.questionCount + ' questions)');
+
+        // 2. Démarrage d'un quiz de 10 questions
+        app.startQuiz({ docId: 'crt-2024', chapterId: 'ch1', mode: 'normal' });
+        assert(doc.querySelector('#view-quiz').hidden === false, 'la vue Quiz devrait être visible');
+        assert(app.state.session.delivered === 10, '10 questions attendues, reçu ' + app.state.session.delivered);
+        assert(app.state.session.items.every((item) => item.question.chapterId === 'ch1'), 'mauvais chapitre');
+        assert(doc.querySelectorAll('#options .option').length === 4, '4 propositions attendues');
+        ok('quiz démarré : 10 questions, 4 propositions, chapitre respecté');
+
+        // 3. Répondre à toutes les questions (7 bonnes, 3 fausses)
+        const expectedCorrect = 7;
+        for (let i = 0; i < 10; i++) {
+          const item = app.state.session.items[i];
+          const shouldBeCorrect = i < expectedCorrect;
+          const chosen = shouldBeCorrect ? item.answerIndex : (item.answerIndex + 1) % 4;
+          const options = doc.querySelectorAll('#options .option');
+          assert(options.length === 4, 'options absentes à la question ' + (i + 1));
+          options[chosen].click();
+          assert(!doc.querySelector('#validate-btn').disabled, 'le bouton Valider devrait être actif');
+          doc.querySelector('#validate-btn').click();
+
+          const feedback = doc.querySelector('#feedback');
+          assert(!feedback.hidden, 'le feedback devrait être affiché');
+          assert(feedback.textContent.length > 10, 'explication absente');
+          assert(feedback.className.includes(shouldBeCorrect ? 'is-correct' : 'is-wrong'), 'style de feedback incorrect');
+          const correctOption = doc.querySelectorAll('#options .option')[item.answerIndex];
+          assert(correctOption.className.includes('is-correct'), 'la bonne réponse devrait être mise en évidence');
+          assert(doc.querySelector('#next-btn').hidden === false, 'bouton suivant absent');
+
+          doc.querySelector('#next-btn').click();
+        }
+
+        // 4. Résultats
+        assert(doc.querySelector('#view-results').hidden === false, 'la vue Résultats devrait être visible');
+        assert(doc.querySelector('#results-score').textContent.trim() === '7/10', 'score affiché incorrect : ' + doc.querySelector('#results-score').textContent);
+        assert(doc.querySelector('#results-percent').textContent.trim() === '70%', 'pourcentage incorrect');
+        assert(doc.querySelectorAll('#missed-list .missed-item').length === 3, 'liste des erreurs incorrecte');
+        assert(doc.querySelector('#review-errors-btn').disabled === false, 'le bouton Réviser mes erreurs devrait être actif');
+        ok('quiz complet corrigé : score 7/10, 3 erreurs listées avec explications');
+
+        // 5. Persistance
+        const stored = win.localStorage.getItem('quizmaster.v1');
+        assert(stored, 'progression absente du localStorage');
+        const state = JSON.parse(stored);
+        assert(state.quizzes.length === 1, 'historique de quiz non enregistré');
+        assert(Object.keys(state.questionStats).length >= 10, 'statistiques par question non enregistrées');
+        assert(state.counters.answered >= 10, 'compteur global non mis à jour');
+        ok('progression persistée : 1 quiz, ' + Object.keys(state.questionStats).length + ' questions suivies');
+
+        // 6. Réviser mes erreurs
+        doc.querySelector('#review-errors-btn').click();
+        assert(doc.querySelector('#view-quiz').hidden === false, 'la révision devrait démarrer');
+        assert(app.state.session.mode === 'review', 'mode révision attendu');
+        assert(app.state.session.delivered === 10, 'la révision doit contenir 10 questions');
+        assert(doc.querySelector('#quiz-chapter').textContent.includes('Révision ciblée'), 'libellé de révision absent');
+        ok('session « Réviser mes erreurs » lancée avec 10 questions');
+
+        // 7. Écran de progression
+        app.navigate('dashboard');
+        assert(doc.querySelector('#view-dashboard').hidden === false, 'tableau de bord invisible');
+        assert(doc.querySelectorAll('#mastery-list .mastery-item').length >= 9, 'maîtrise par chapitre non rendue');
+        assert(doc.querySelectorAll('#history-body tr').length === 1, 'historique non rendu');
+        assert(doc.querySelectorAll('#dashboard-stats .stat-card').length === 4, 'KPI du tableau de bord manquants');
+        ok('tableau de bord : 9 chapitres, historique et KPI rendus');
+
+        // 8. Extraction DOCX réelle dans le navigateur
+        const extracted = await loadDocx(win);
+        assert(extracted.text.length > 25000, 'texte DOCX trop court : ' + extracted.text.length);
+        assert(/CHAPITRE I/i.test(extracted.text), 'titres de chapitres absents du DOCX');
+        ok('DOCX réel extrait dans le navigateur (' + extracted.text.length + ' caractères)');
+
+        // 9. Génération de bout en bout
+        const generated = win.QuestionGenerator.generate(extracted.text, {
+          documentId: 'headless-doc',
+          documentName: 'CRT 2024'
+        });
+        assert(generated.chapters.length >= 8, 'chapitres générés insuffisants : ' + generated.chapters.length);
+        assert(generated.stats.questions >= 60, 'questions générées insuffisantes : ' + generated.stats.questions);
+        for (const chapter of generated.chapters) {
+          for (const question of chapter.questions) {
+            assert(question.options.length === 4, '4 options attendues');
+            assert(new Set(question.options.map((o) => o.toLowerCase())).size === 4, 'options dupliquées');
+            assert(question.answer >= 0 && question.answer < 4, 'index invalide');
+          }
+        }
+        ok('génération locale dans le navigateur : ' + generated.stats.questions + ' questions / ' + generated.chapters.length + ' chapitres');
+
+        // 10. Réglages et export
+        app.navigate('settings');
+        assert(doc.querySelector('#view-settings').hidden === false, 'réglages invisibles');
+        assert(doc.querySelector('#storage-usage').textContent.includes('Ko') || doc.querySelector('#storage-usage').textContent.includes('Mo'), 'compteur de stockage vide');
+        const exported = app.state.progress.exportAll();
+        assert(exported.app === 'quiz-master' && exported.state.quizzes.length === 1, 'export invalide');
+        ok('réglages et export de sauvegarde fonctionnels');
+
+        // 11. Un tour sur la bibliothèque
+        app.navigate('library');
+        assert(doc.querySelectorAll('#chapter-grid .chapter-card').length >= 9, 'cartes de chapitres manquantes');
+        assert(doc.querySelector('#doc-select').value === 'crt-2024', 'cours actif incorrect');
+        ok('bibliothèque : cours et chapitres listés');
+
+        // 12. Import complet via l'interface (fichier réel + pipeline de génération)
+        const response = await fetch('/CRT%202024.docx');
+        assert(response.ok, 'téléchargement du DOCX impossible');
+        const blob = await response.blob();
+        const file = new File([blob], 'Import test.docx', {
+          type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        });
+        const transfer = new DataTransfer();
+        transfer.items.add(file);
+        const input = doc.querySelector('#file-input');
+        input.files = transfer.files;
+        input.dispatchEvent(new Event('change'));
+
+        await waitFor(() => app.state.progress.listDocuments().some((item) => item.name === 'Import test'), 20000);
+        const importedDoc = app.state.progress.listDocuments().find((item) => item.name === 'Import test');
+        assert(importedDoc, 'cours importé absent de la bibliothèque');
+        assert(importedDoc.questionCount >= 60, 'banque importée trop petite : ' + importedDoc.questionCount);
+        assert(app.getBank(importedDoc.id), 'banque de questions importée introuvable');
+        assert(doc.querySelector('#doc-select').value === importedDoc.id, 'le cours importé devrait être actif');
+        assert(doc.querySelectorAll('#chapter-grid .chapter-card').length >= 6, 'chapitres du cours importé non affichés');
+        ok('import DOCX via l’interface : ' + importedDoc.questionCount + ' questions, ' + importedDoc.chapters.length + ' parties');
+
+        // 13. Quiz sur le cours importé
+        app.startQuiz({ docId: importedDoc.id, chapterId: 'all', mode: 'normal' });
+        assert(app.state.session.delivered === 10, '10 questions attendues sur le cours importé');
+        assert(doc.querySelector('#view-quiz').hidden === false, 'le quiz importé ne démarre pas');
+        assert(doc.querySelectorAll('#options .option').length === 4, 'options manquantes');
+        const chapterTitle = doc.querySelector('#quiz-chapter').textContent;
+        assert(chapterTitle.includes('Import test'), 'cours affiché incorrect : ' + chapterTitle);
+        ok('quiz jouable sur un cours importé (10 questions, 4 propositions)');
+      }
+
+      frame.addEventListener('load', function () {
+        run().then(finish).catch(function (error) {
+          fail('test global', error);
+          finish();
+        });
+      });
+
+      window.addEventListener('error', function (event) {
+        fail('erreur JavaScript', event.message);
+      });
+    })();
+  </script>
+</body>
+</html>
